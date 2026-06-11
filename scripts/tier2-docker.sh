@@ -31,6 +31,7 @@ run_playbook() {
     -e model_large_v3_turbo=false \
     -e model_tiny_en=true \
     -e run_smoke_test=\$1 \
+    -e force_cpu_build=true \
     $REF_ARG
 }
 

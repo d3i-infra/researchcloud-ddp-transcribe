@@ -24,7 +24,9 @@
       failing. This playbook deliberately never installs kernel drivers
       (reboot hazard mid-provision). Use a GPU flavor image that ships the
       NVIDIA driver, or install the driver manually, reboot, and re-run.
-  when: lspci_nvidia.rc == 0 and nvidia_smi.rc != 0
+  when: >-
+    lspci_nvidia.rc == 0 and nvidia_smi.rc != 0
+    and not (force_cpu_build | bool)
 
 - name: Set GPU facts
   ansible.builtin.set_fact:

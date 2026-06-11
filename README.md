@@ -42,7 +42,7 @@ run scripts (`init`, `ingest`, `process [--max-videos N]`; exit 3 from
 | `download_workers` | `3` | keep | Parallel fetch workers baked into run scripts |
 | `compute_lang_probs` | `false` | keep | Per-language probability pass (~1.5–2× slower per video) |
 | `run_smoke_test` | `false` | keep | Provision-time init+ingest against a bundled fixture |
-| `force_cpu_build` | `false` | keep | Build without the `cuda` feature even on a GPU flavor (debug aid) |
+| `force_cpu_build` | `false` | keep | Build without the `cuda` feature even on a GPU flavor; also bypasses the GPU-without-driver hard-fail (debug aid, and used by the Tier 2 container test where the host GPU leaks into `lspci`) |
 
 Booleans may arrive from SRC as strings; the playbook coerces with `| bool`.
 
