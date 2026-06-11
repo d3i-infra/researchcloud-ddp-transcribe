@@ -1,0 +1,19 @@
+---
+# yt-dlp via pipx, exactly this extras form. Never `pipx inject curl-cffi`:
+# yt-dlp pins a compatible curl-cffi range, and an unpinned inject causes a
+# silent impersonation fallback (ddp-transcribe docs/bake-findings.md,
+# RESOLVED 2026-05-13).
+
+- name: Install yt-dlp with impersonation support via pipx
+  ansible.builtin.command: pipx install 'yt-dlp[default,curl-cffi]'
+  args:
+    creates: "{{ pipeline_home }}/.local/bin/yt-dlp"
+  become: true
+  become_user: "{{ pipeline_user }}"
+
+- name: Ensure ~/.local/bin is on pipeline_user's PATH
+  ansible.builtin.command: pipx ensurepath
+  register: ensurepath
+  changed_when: "'Added' in ensurepath.stdout"
+  become: true
+  become_user: "{{ pipeline_user }}"

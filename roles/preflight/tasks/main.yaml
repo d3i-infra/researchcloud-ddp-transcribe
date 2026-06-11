@@ -1,0 +1,38 @@
+---
+# Fail fast on missing/invalid required parameters, before any apt churn.
+
+- name: Require storage_path and pipeline_user parameters
+  ansible.builtin.assert:
+    that:
+      - storage_path is defined
+      - storage_path | length > 0
+      - pipeline_user is defined
+      - pipeline_user | length > 0
+    fail_msg: >-
+      Required parameters missing: storage_path (mount point of the attached
+      storage volume) and pipeline_user (workspace user that owns the run
+      layout) must both be set.
+
+- name: Look up pipeline_user account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ pipeline_user }}"
+
+- name: Record pipeline_user home directory
+  ansible.builtin.set_fact:
+    pipeline_home: "{{ getent_passwd[pipeline_user][4] }}"
+    pipeline_src_dir: "{{ getent_passwd[pipeline_user][4] }}/src/ddp-transcribe"
+    state_dir: "{{ getent_passwd[pipeline_user][4] }}/ddp-state"
+
+- name: Check storage_path exists
+  ansible.builtin.stat:
+    path: "{{ storage_path }}"
+  register: storage_stat
+
+- name: Fail if storage_path is not a directory
+  ansible.builtin.fail:
+    msg: >-
+      storage_path '{{ storage_path }}' does not exist or is not a directory.
+      Attach an external storage volume to the workspace and pass its mount
+      point (typically /home/<user>/data/<volume-name>).
+  when: not storage_stat.stat.exists or not storage_stat.stat.isdir

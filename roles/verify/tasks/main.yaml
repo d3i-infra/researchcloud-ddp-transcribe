@@ -1,0 +1,66 @@
+---
+# Post-provision gates. All read-only except the optional smoke test,
+# which works in a temp dir and removes it. No network video fetch at
+# provision time (slow, flaky, TikTok-dependent) — real transcription
+# smoke happens in the post-registration validation pass.
+
+- name: Binary runs
+  ansible.builtin.command: /usr/local/bin/ddp-transcribe --help
+  changed_when: false
+
+- name: Binary is CUDA-linked (no-silent-CPU-fallback gate)
+  ansible.builtin.shell: ldd /usr/local/bin/ddp-transcribe | grep -q libcudart
+  changed_when: false
+  when: cuda_build | bool
+
+- name: Verify yt-dlp impersonation targets are available
+  ansible.builtin.command: "{{ pipeline_home }}/.local/bin/yt-dlp --list-impersonate-targets"
+  register: impersonate_targets
+  changed_when: false
+  failed_when: >-
+    impersonate_targets.rc != 0
+    or 'chrome' not in (impersonate_targets.stdout | lower)
+  become: true
+  become_user: "{{ pipeline_user }}"
+
+- name: Smoke test (init + ingest of bundled fixture)
+  when: run_smoke_test | bool
+  become: true
+  become_user: "{{ pipeline_user }}"
+  block:
+    - name: Create smoke-test scratch dir
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: ddp-smoke
+      register: smoke_dir
+
+    - name: Stage fixture inbox
+      ansible.builtin.copy:
+        src: "{{ pipeline_src_dir }}/tests/fixtures/ddp/news_orgs/"
+        dest: "{{ smoke_dir.path }}/inbox/"
+        remote_src: true
+
+    - name: Smoke init
+      ansible.builtin.command: >-
+        /usr/local/bin/ddp-transcribe
+        --state-db {{ smoke_dir.path }}/state.sqlite
+        --inbox {{ smoke_dir.path }}/inbox
+        --transcripts {{ smoke_dir.path }}/transcripts
+        init
+      changed_when: true
+
+    - name: Smoke ingest
+      ansible.builtin.command: >-
+        /usr/local/bin/ddp-transcribe
+        --state-db {{ smoke_dir.path }}/state.sqlite
+        --inbox {{ smoke_dir.path }}/inbox
+        --transcripts {{ smoke_dir.path }}/transcripts
+        ingest
+      changed_when: true
+
+  always:
+    - name: Remove smoke-test scratch dir
+      ansible.builtin.file:
+        path: "{{ smoke_dir.path }}"
+        state: absent
+      when: smoke_dir is defined and smoke_dir.path is defined

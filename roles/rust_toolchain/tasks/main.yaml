@@ -1,0 +1,13 @@
+---
+# Rust stable via rustup, installed for pipeline_user (never root).
+# PATH under become is unreliable, so later roles always invoke cargo by
+# absolute path: {{ pipeline_home }}/.cargo/bin/cargo.
+
+- name: Install rustup + stable toolchain for pipeline_user # noqa: command-instead-of-module
+  ansible.builtin.shell: >-
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+    sh -s -- -y --default-toolchain stable --no-modify-path
+  args:
+    creates: "{{ pipeline_home }}/.cargo/bin/cargo"
+  become: true
+  become_user: "{{ pipeline_user }}"

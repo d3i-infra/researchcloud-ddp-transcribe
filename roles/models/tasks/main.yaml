@@ -1,0 +1,33 @@
+---
+# Download the whisper models the workspace creator selected. Models live
+# on the storage volume (never the 15 GB boot disk); they are read-once at
+# pipeline startup, so the NFS-like mount is safe for them.
+
+- name: Ensure models directory on storage
+  ansible.builtin.file:
+    path: "{{ storage_path }}/models"
+    state: directory
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_user }}"
+    mode: "0755"
+
+- name: Download selected whisper models
+  ansible.builtin.get_url:
+    url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{{ item.file }}"
+    dest: "{{ storage_path }}/models/{{ item.file }}"
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_user }}"
+    mode: "0644"
+    timeout: 120
+  loop:
+    - file: ggml-large-v3-turbo-q5_0.bin
+      wanted: "{{ model_large_v3_turbo }}"
+    - file: ggml-tiny.en.bin
+      wanted: "{{ model_tiny_en }}"
+    - file: ggml-small.bin
+      wanted: "{{ model_small }}"
+  when: item.wanted | bool
+  register: model_download
+  retries: 2
+  delay: 10
+  until: model_download is succeeded

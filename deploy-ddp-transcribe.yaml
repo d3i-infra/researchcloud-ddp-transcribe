@@ -1,0 +1,46 @@
+---
+# Entry playbook for the ddp-transcribe SRC catalog item component.
+# Run by SRC-External on the workspace itself (local connection, stock
+# Ansible). Provisions a full bake: system deps, CUDA toolkit (detect,
+# else install; never drivers), Rust toolchain, yt-dlp, the pipeline
+# binary built from a pinned ref, selected whisper models, and the
+# operator-driven run layout (per-GPU helper scripts; no systemd).
+#
+# Required parameters (no defaults — provisioning fails fast without them):
+#   storage_path    mount point of the attached storage volume,
+#                   e.g. /home/<user>/data/<volume>
+#   pipeline_user   workspace user that owns the run scripts and state dir
+#
+# All other parameters carry defaults below; SRC parameter values arrive
+# as extra-vars and take precedence. Booleans may arrive as strings —
+# every consumer coerces with `| bool`.
+- name: Provision ddp-transcribe workspace
+  hosts: 127.0.0.1
+  connection: local
+  gather_facts: true
+  become: true
+  vars:
+    pipeline_git_repo: "https://github.com/daniellemccool/ddp-transcribe"
+    pipeline_git_ref: "v0.2.0-rc1"
+    download_workers: 3
+    compute_lang_probs: false
+    run_smoke_test: false
+    force_cpu_build: false
+    model_large_v3_turbo: true
+    model_tiny_en: false
+    model_small: false
+    # CUDA pins: the bake-verified toolkit (ddp-transcribe
+    # docs/SRC-BAKE-NOTES.md). Do not float to "latest".
+    cuda_repo_base: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64"
+    cuda_keyring_url: "{{ cuda_repo_base }}/cuda-keyring_1.1-1_all.deb"
+    cuda_toolkit_package: "cuda-toolkit-13-2"
+  roles:
+    - role: preflight
+    - role: system_deps
+    - role: cuda
+    - role: rust_toolchain
+    - role: ytdlp
+    - role: pipeline_build
+    - role: models
+    - role: workspace_layout
+    - role: verify

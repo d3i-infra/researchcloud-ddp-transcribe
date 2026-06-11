@@ -1,0 +1,53 @@
+---
+# Clone the pipeline at a pinned ref and build the release binary, with
+# the cuda feature when a GPU is present (cuda_build fact from the cuda
+# role). Rebuilds only when the ref moved or no binary is installed; the
+# target/ dir is removed after install (15 GB boot disk).
+
+- name: Check for installed binary
+  ansible.builtin.stat:
+    path: /usr/local/bin/ddp-transcribe
+  register: installed_binary
+
+- name: Clone ddp-transcribe at pinned ref
+  ansible.builtin.git:
+    repo: "{{ pipeline_git_repo }}"
+    dest: "{{ pipeline_src_dir }}"
+    version: "{{ pipeline_git_ref }}"
+  become: true
+  become_user: "{{ pipeline_user }}"
+  register: repo_checkout
+
+- name: Decide whether a build is needed
+  ansible.builtin.set_fact:
+    build_needed: "{{ repo_checkout.changed or not installed_binary.stat.exists }}"
+
+- name: Build release binary ({{ 'CUDA' if cuda_build | bool else 'CPU' }})
+  ansible.builtin.command:
+    cmd: >-
+      {{ pipeline_home }}/.cargo/bin/cargo build --release
+      {{ '--features cuda' if cuda_build | bool else '' }}
+    chdir: "{{ pipeline_src_dir }}"
+  environment:
+    PATH: "/usr/local/cuda/bin:{{ pipeline_home }}/.cargo/bin:{{ ansible_env.PATH }}"
+  become: true
+  become_user: "{{ pipeline_user }}"
+  when: build_needed | bool
+
+- name: Install binary to /usr/local/bin
+  ansible.builtin.copy:
+    src: "{{ pipeline_src_dir }}/target/release/ddp-transcribe"
+    dest: /usr/local/bin/ddp-transcribe
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: build_needed | bool
+
+- name: Remove build artifacts (15 GB boot disk)
+  ansible.builtin.command:
+    cmd: "{{ pipeline_home }}/.cargo/bin/cargo clean"
+    chdir: "{{ pipeline_src_dir }}"
+  become: true
+  become_user: "{{ pipeline_user }}"
+  when: build_needed | bool

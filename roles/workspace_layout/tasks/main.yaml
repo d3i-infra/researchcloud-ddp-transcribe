@@ -1,0 +1,45 @@
+---
+# Lay down the operator-facing run layout. state.sqlite MUST live on the
+# boot disk (POSIX fsync): SQLite WAL on the NFS-like storage mount is a
+# documented corruption hazard (ddp-transcribe docs/SRC-RUNBOOK.md).
+# Transcripts and inbox are write-once/read-only and live on storage.
+# No systemd: runs are operator-driven by design.
+
+- name: Create working directories on storage
+  ansible.builtin.file:
+    path: "{{ storage_path }}/{{ item }}"
+    state: directory
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_user }}"
+    mode: "0755"
+  loop:
+    - inbox
+    - transcripts
+    - archive
+
+- name: Create native state directory (POSIX fsync for SQLite WAL)
+  ansible.builtin.file:
+    path: "{{ state_dir }}"
+    state: directory
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_user }}"
+    mode: "0755"
+
+- name: Pick the default model for run scripts
+  ansible.builtin.set_fact:
+    default_model: >-
+      {{ 'ggml-large-v3-turbo-q5_0.bin' if model_large_v3_turbo | bool
+         else 'ggml-small.bin' if model_small | bool
+         else 'ggml-tiny.en.bin' }}
+    instance_count: "{{ gpu_count if cuda_build | bool else 1 }}"
+
+- name: Generate per-instance run scripts
+  ansible.builtin.template:
+    src: run-pipeline.sh.j2
+    dest: "{{ pipeline_home }}/run-pipeline{{ ('-gpu' ~ item) if cuda_build | bool else '' }}.sh"
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_user }}"
+    mode: "0755"
+  vars:
+    instance_id: "{{ item }}"
+  loop: "{{ range(instance_count | int) | list }}"

@@ -1,0 +1,54 @@
+---
+# Detect GPU/driver state and install the CUDA *toolkit* if (and only if)
+# a working driver is present and nvcc is missing. This role never
+# installs kernel drivers: a driver install mid-provision can require a
+# reboot, which SRC-External cannot survive. SRC GPU flavor images are
+# expected to ship the driver.
+
+- name: Detect NVIDIA hardware
+  ansible.builtin.shell: lspci | grep -iq nvidia
+  register: lspci_nvidia
+  failed_when: false
+  changed_when: false
+
+- name: Probe NVIDIA driver
+  ansible.builtin.command: nvidia-smi -L
+  register: nvidia_smi
+  failed_when: false
+  changed_when: false
+
+- name: Fail if GPU hardware is present but the driver is not
+  ansible.builtin.fail:
+    msg: >-
+      An NVIDIA GPU is visible on the PCI bus but nvidia-smi is absent or
+      failing. This playbook deliberately never installs kernel drivers
+      (reboot hazard mid-provision). Use a GPU flavor image that ships the
+      NVIDIA driver, or install the driver manually, reboot, and re-run.
+  when: lspci_nvidia.rc == 0 and nvidia_smi.rc != 0
+
+- name: Set GPU facts
+  ansible.builtin.set_fact:
+    gpu_count: "{{ nvidia_smi.stdout_lines | length if nvidia_smi.rc == 0 else 0 }}"
+    cuda_build: "{{ nvidia_smi.rc == 0 and not (force_cpu_build | bool) }}"
+
+- name: Check for nvcc
+  ansible.builtin.stat:
+    path: /usr/local/cuda/bin/nvcc
+  register: nvcc_stat
+
+- name: Install NVIDIA CUDA repository keyring
+  ansible.builtin.apt:
+    deb: "{{ cuda_keyring_url }}"
+  when: (cuda_build | bool) and not nvcc_stat.stat.exists
+
+- name: Install pinned CUDA toolkit
+  ansible.builtin.apt:
+    name: "{{ cuda_toolkit_package }}"
+    state: present
+    update_cache: true
+  when: (cuda_build | bool) and not nvcc_stat.stat.exists
+
+- name: Clean apt cache after CUDA install (15 GB boot disk)
+  ansible.builtin.apt:
+    clean: true
+  when: (cuda_build | bool) and not nvcc_stat.stat.exists

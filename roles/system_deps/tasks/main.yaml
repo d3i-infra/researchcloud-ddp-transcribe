@@ -1,0 +1,31 @@
+---
+# Build + runtime system packages. The versioned libclang-18-dev is
+# load-bearing: on Ubuntu 24.04 the generic libclang-dev ships only C++
+# headers, and whisper-rs's bindgen needs the C API (clang-c/Index.h).
+# acl enables Ansible's become_user file handoff for unprivileged tasks.
+
+- name: Install build and runtime packages
+  ansible.builtin.apt:
+    name:
+      - acl
+      - build-essential
+      - ca-certificates
+      - cmake
+      - clang
+      - libclang-18-dev
+      - curl
+      - git
+      - ffmpeg
+      - sqlite3
+      - jq
+      - pciutils
+      - pipx
+      - pkg-config
+    state: present
+    update_cache: true
+  register: system_packages
+
+- name: Clean apt cache (15 GB boot disk)
+  ansible.builtin.apt:
+    clean: true
+  when: system_packages is changed

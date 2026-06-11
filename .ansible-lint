@@ -1,0 +1,14 @@
+---
+profile: moderate
+
+exclude_paths:
+  - .git/
+  - .venv/
+  - .venv-lint/
+
+skip_list:
+  # Cross-role facts are this component's design: preflight derives
+  # pipeline_home/pipeline_src_dir/state_dir, cuda derives
+  # cuda_build/gpu_count, and later roles consume them. Role-prefixing
+  # shared facts would obscure, not clarify.
+  - var-naming[no-role-prefix]
