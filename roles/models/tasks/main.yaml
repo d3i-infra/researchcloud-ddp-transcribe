@@ -8,7 +8,7 @@
     path: "{{ storage_path }}/models"
     state: directory
     owner: "{{ pipeline_user }}"
-    group: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
     mode: "0755"
 
 - name: Download selected whisper models
@@ -16,7 +16,7 @@
     url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{{ item.file }}"
     dest: "{{ storage_path }}/models/{{ item.file }}"
     owner: "{{ pipeline_user }}"
-    group: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
     mode: "0644"
     timeout: 120
   loop:

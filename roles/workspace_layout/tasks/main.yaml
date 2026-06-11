@@ -10,7 +10,7 @@
     path: "{{ storage_path }}/{{ item }}"
     state: directory
     owner: "{{ pipeline_user }}"
-    group: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
     mode: "0755"
   loop:
     - inbox
@@ -22,7 +22,7 @@
     path: "{{ state_dir }}"
     state: directory
     owner: "{{ pipeline_user }}"
-    group: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
     mode: "0755"
 
 - name: Pick the default model for run scripts
@@ -38,7 +38,7 @@
     src: run-pipeline.sh.j2
     dest: "{{ pipeline_home }}/run-pipeline{{ ('-gpu' ~ item) if cuda_build | bool else '' }}.sh"
     owner: "{{ pipeline_user }}"
-    group: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
     mode: "0755"
   vars:
     instance_id: "{{ item }}"

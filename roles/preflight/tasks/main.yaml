@@ -18,11 +18,14 @@
     database: passwd
     key: "{{ pipeline_user }}"
 
-- name: Record pipeline_user home directory
+- name: Record pipeline_user home directory and primary group
   ansible.builtin.set_fact:
     pipeline_home: "{{ getent_passwd[pipeline_user][4] }}"
     pipeline_src_dir: "{{ getent_passwd[pipeline_user][4] }}/src/ddp-transcribe"
     state_dir: "{{ getent_passwd[pipeline_user][4] }}/ddp-state"
+    # Primary group by gid, NOT the username: SRC-CO provisions users into
+    # a CO group (e.g. rsc_co_NNNNNN) with no per-user group.
+    pipeline_group: "{{ getent_passwd[pipeline_user][2] }}"
 
 - name: Check storage_path exists
   ansible.builtin.stat:
