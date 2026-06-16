@@ -62,18 +62,21 @@ Each declaration has a **Source type** (`Fixed` / `Resource` / `Co-Secret` /
 Overwritable flag is what lets the catalog item later "Make interactive" or
 "Overwrite"; unchecked locks the value at the component default.
 
-| Parameter | Source type | Default value | Overwritable |
-|---|---|---|---|
-| `storage_path` | Fixed | *(leave blank — required at launch)* | ✓ |
-| `pipeline_user` | Fixed | *(leave blank — required at launch)* | ✓ |
-| `model_large_v3_turbo` | Fixed | `true` | ✓ |
-| `model_tiny_en` | Fixed | `false` | ✓ |
-| `model_small` | Fixed | `false` | ✓ |
-| `pipeline_git_ref` | Fixed | `v0.2.0-rc1` | ✓ |
-| `download_workers` | Fixed | `3` | ✓ |
-| `compute_lang_probs` | Fixed | `false` | ✓ |
-| `run_smoke_test` | Fixed | `false` | ✓ |
-| `force_cpu_build` | Fixed | `false` | ✓ |
+Each parameter also takes a short **Description** (shown to the workspace creator
+for the interactive ones); suggested text in the last column.
+
+| Parameter | Source type | Default value | Overwritable | Description |
+|---|---|---|---|---|
+| `storage_path` | Fixed | *(blank — required)* | ✓ | Mount point of the attached storage volume (e.g. `/home/<user>/data/<volume>`); holds inbox, transcripts, models, archive. |
+| `pipeline_user` | Fixed | *(blank — required)* | ✓ | Workspace account that owns the source tree, run scripts, and state DB (your SRC username, e.g. `dmccool`). |
+| `model_large_v3_turbo` | Fixed | `true` | ✓ | Download the large-v3-turbo whisper model (~573 MB; recommended production model). |
+| `model_tiny_en` | Fixed | `false` | ✓ | Download the tiny.en whisper model (~75 MB; fast, English-only; for smoke tests). |
+| `model_small` | Fixed | `false` | ✓ | Download the small whisper model (~466 MB; multilingual fallback). |
+| `pipeline_git_ref` | Fixed | `v0.2.0-rc1` | ✓ | Git tag/ref of the ddp-transcribe pipeline to build. |
+| `download_workers` | Fixed | `3` | ✓ | Parallel video-download workers baked into the run scripts. |
+| `compute_lang_probs` | Fixed | `false` | ✓ | Add a per-language probability pass during transcription (~1.5–2× slower per video). |
+| `run_smoke_test` | Fixed | `false` | ✓ | Run an init+ingest against a bundled fixture during provisioning (verification only). |
+| `force_cpu_build` | Fixed | `false` | ✓ | Build without CUDA even on a GPU flavor (debug aid; also bypasses the GPU-without-driver hard-fail). |
 
 `storage_path`/`pipeline_user` "required-ness" is enforced by making them
 interactive at the catalog item **and** the playbook's preflight `assert`
