@@ -171,8 +171,18 @@ Wiring per the component README. Action column: Keep / Overwrite / Make-interact
 | `run_smoke_test` | ddp-transcribe | Keep | `false` (operator smokes by hand post-provision) |
 | `force_cpu_build` | ddp-transcribe | Keep | `false` |
 | `co_passwordless_sudo` | SRC-CO | **Overwrite** | `true` |
-| `timeout` | SRC-External | **Overwrite** | `7200` — see note below |
-| `remote_ansible_version` | SRC-External | Keep | `9.1.0` |
+| `timeout` | SRC-External plugin | **Overwrite** | `7200` — see note below |
+| `remote_ansible_version` | SRC-External plugin | Keep | `9.1.0` (the verified version) |
+
+**All other upstream parameters: Keep value** — the defaults are correct for us.
+SRC-OS (`add_ips_to_hosts` false, `os_disk_format` true, `volume_mount_no_name`
+false — the last is why the external volume mounts at `…/data/<volume-name>`);
+SRC-CO (`co_admin_user_only`/`co_owner_user_only` false, `co_roles_enabled` true,
+`co_totp` true); SRC-External plugin (`disable_log` false — keep the provisioning
+log). Only the two **Overwrite** rows above and the `co_passwordless_sudo` flip
+differ from upstream defaults. `co_research_drive` (true) installs WebDAV mount
+scripts — harmless; our storage is a block volume, so set false only if you want
+a leaner box and will never use Research Drive.
 
 > **timeout:** the default 3600 s may be too tight for a *cold* provision — the
 > `cargo build --release --features cuda` of whisper-rs compiles CUDA kernels via
