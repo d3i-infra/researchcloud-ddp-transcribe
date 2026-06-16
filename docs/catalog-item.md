@@ -50,9 +50,36 @@ its own user-facing set in Step C):
   Operator-driven, SSH only.
 - **Icon:** `assets/icon.png` (d3i brand palette; <100KB, reads at 32–40px)
 
-**Step 3 — parameters:** declared per the README; wired by the catalog item in
-Step G. No Component Secrets — the pipeline repo and all downloads (NVIDIA repo,
-HuggingFace, crates.io) are public/anonymous.
+**Step 3 — parameters:** **DO NOT SKIP.** SRC does *not* auto-discover variables
+from the playbook — you must declare each parameter here by hand, or it will not
+appear at the catalog item's Parameters step (a param "not explicitly required by
+a component has no effect"). Declare exactly these (defaults match the playbook's
+`vars:`; the two without a default are required):
+
+| Parameter | Type | Default | Required |
+|---|---|---|---|
+| `storage_path` | string | *(none)* | **yes** |
+| `pipeline_user` | string | *(none)* | **yes** |
+| `model_large_v3_turbo` | boolean | `true` | no |
+| `model_tiny_en` | boolean | `false` | no |
+| `model_small` | boolean | `false` | no |
+| `pipeline_git_ref` | string | `v0.2.0-rc1` | no |
+| `download_workers` | integer | `3` | no |
+| `compute_lang_probs` | boolean | `false` | no |
+| `run_smoke_test` | boolean | `false` | no |
+| `force_cpu_build` | boolean | `false` | no |
+
+Declare the model flags as **boolean** so they render as checkboxes when made
+interactive. Do *not* declare `co_passwordless_sudo` / `timeout` /
+`remote_ansible_version` here — those belong to SRC-CO and SRC-External plugin
+and surface at the catalog item Parameters step on their own. Internals
+(`pipeline_git_repo`, `cuda_*`) stay as playbook vars, undeclared. No Component
+Secrets — the pipeline repo and all downloads (NVIDIA, HuggingFace, crates.io)
+are public/anonymous.
+
+> If you already created the component without parameters: **edit** it (don't
+> recreate). Editing overwrites the development version; the catalog item, which
+> references that development version, will then show the parameters.
 
 **Step 4 — owner & support:** owner CO (see decisions above), support url/name/email.
 
