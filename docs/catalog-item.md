@@ -48,6 +48,7 @@ its own user-facing set in Step C):
   out inbox/transcripts/archive on the attached volume and the state DB on the
   boot disk. CUDA toolkit 13.2 is detect-else-install; never installs drivers.
   Operator-driven, SSH only.
+- **Icon:** `assets/icon.png` (d3i brand palette; <100KB, reads at 32–40px)
 
 **Step 3 — parameters:** declared per the README; wired by the catalog item in
 Step G. No Component Secrets — the pipeline repo and all downloads (NVIDIA repo,
@@ -85,6 +86,7 @@ User-facing (the Catalog tab); keep distinct from the component's Step 2 set.
   NVIDIA flavours); select your models at launch and point it at an attached
   storage volume. SSH in and drive it with the generated run scripts
   (`init` / `ingest` / `process`).
+- **Icon:** `assets/icon.png` (same as the component)
 
 ## Step D — Owner & support
 
