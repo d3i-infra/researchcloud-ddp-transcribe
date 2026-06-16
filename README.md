@@ -17,17 +17,23 @@ SRC-External on the workspace itself.
 - The `ddp-transcribe` release binary, built from a pinned git ref with
   `--features cuda` when a GPU is present, installed to `/usr/local/bin`
   (build tree removed afterwards — the boot disk is 15 GB)
-- The whisper models selected at workspace creation, downloaded to
-  `<storage_path>/models/`
-- Run layout: `<storage_path>/{inbox,transcripts,models,archive}` on the
-  attached volume; `~/ddp-state/` on the boot disk (SQLite WAL needs POSIX
-  fsync — never put the state DB on the NFS-like storage mount); one
-  generated `~/run-pipeline-gpuN.sh` per GPU (`CUDA_VISIBLE_DEVICES`-pinned)
-  or a single `~/run-pipeline.sh` on CPU flavors
+- The whisper models selected at workspace creation, downloaded to the boot
+  disk (`~/ddp-work/models/`) — see the storage layout below
+- Storage layout (per [ADR 0032](https://github.com/daniellemccool/ddp-transcribe/blob/main/docs/decisions/0032-transcription-hot-path-on-boot-disk-storage-volume-is-seed-at-provision-and-sink-at-downtime.md)): the transcription hot path runs off the
+  **boot disk** — whisper model (`~/ddp-work/models`), live transcripts
+  (`~/ddp-work/transcripts`, the sharded `NN/` tree), and `~/ddp-state/state.sqlite`
+  (SQLite WAL needs POSIX fsync — never the NFS-like mount). The **storage
+  volume** is seed + sink: `<storage_path>/{inbox,transcripts,archive}` plus a
+  `state-snapshot.sqlite`. One generated `~/run-pipeline-gpuN.sh` per GPU
+  (`CUDA_VISIBLE_DEVICES`-pinned) or a single `~/run-pipeline.sh` on CPU flavors,
+  plus `~/sync-to-storage.sh` and `~/restore-from-storage.sh`
 
 Runs are **operator-driven** — there is no systemd unit. SSH in and use the
 run scripts (`init`, `ingest`, `process [--max-videos N]`; exit 3 from
-`process` means "zero videos claimed", not an error).
+`process` means "zero videos claimed", not an error). After each `process`
+run the script **auto-syncs** the boot-disk transcripts and a state snapshot
+to the volume; chunk long runs with `--max-videos` to bound the unsynced
+window. A rebuilt workspace resumes a batch via `~/restore-from-storage.sh`.
 
 ## Parameters
 

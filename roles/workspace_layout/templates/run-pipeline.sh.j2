@@ -9,6 +9,9 @@
 #
 # Drop DDP watch-history JSONs into {{ storage_path }}/inbox before ingest.
 # `process` exits 3 when zero videos were claimed (done/empty) — not an error.
+# Transcripts are written to the boot disk ({{ work_dir }}/transcripts) for
+# speed + durability (ADR 0032); run ~/sync-to-storage.sh at batch boundaries
+# to push them to the volume.
 {% if cuda_build | bool %}
 # Instance {{ instance_id }}: pinned to physical GPU {{ instance_id }}. The binary always
 # addresses CUDA device 0; CUDA_VISIBLE_DEVICES remaps it. All instances
@@ -19,13 +22,26 @@ set -euo pipefail
 {% if cuda_build | bool %}
 export CUDA_VISIBLE_DEVICES={{ instance_id }}
 {% endif %}
-exec /usr/local/bin/ddp-transcribe \
+# Auto-sync to the storage volume after a `process` run (ADR 0032) rather than
+# waiting on an operator. Capture the subcommand before the binary consumes it.
+subcommand="${1:-}"
+
+rc=0
+/usr/local/bin/ddp-transcribe \
   --state-db "{{ state_dir }}/state.sqlite" \
   --inbox "{{ storage_path }}/inbox" \
-  --transcripts "{{ storage_path }}/transcripts" \
-  --whisper-model "{{ storage_path }}/models/{{ default_model }}" \
+  --transcripts "{{ work_dir }}/transcripts" \
+  --whisper-model "{{ work_dir }}/models/{{ default_model }}" \
   --download-workers {{ download_workers }} \
 {% if compute_lang_probs | bool %}
   --compute-lang-probs \
 {% endif %}
-  "$@"
+  "$@" || rc=$?
+
+# Persist even on a non-zero exit so transcripts produced before an error (or
+# exit 3 = "zero videos claimed") are not stranded on the ephemeral boot disk.
+if [ "$subcommand" = "process" ]; then
+  "{{ pipeline_home }}/sync-to-storage.sh"
+fi
+
+exit "$rc"

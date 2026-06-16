@@ -1,11 +1,14 @@
 ---
-# Lay down the operator-facing run layout. state.sqlite MUST live on the
-# boot disk (POSIX fsync): SQLite WAL on the NFS-like storage mount is a
-# documented corruption hazard (ddp-transcribe docs/SRC-RUNBOOK.md).
-# Transcripts and inbox are write-once/read-only and live on storage.
-# No systemd: runs are operator-driven by design.
+# Lay down the operator-facing run layout (ADR 0032). The transcription hot
+# path runs off the boot disk: the whisper model (~/ddp-work/models, created by
+# the models role) and transcripts_root (~/ddp-work/transcripts) are local, and
+# state.sqlite lives on the boot disk for POSIX fsync (SQLite WAL on the
+# NFS-like mount is a corruption hazard). The storage volume is seed + sink: it
+# holds inbox (read once at ingest), the durable transcript sink, archive, and
+# a state snapshot. run-pipeline*.sh auto-syncs boot disk -> volume after each
+# `process` run via sync-to-storage.sh. No systemd: runs are operator-driven.
 
-- name: Create working directories on storage
+- name: Create durable directories on the storage volume (seed + sink)
   ansible.builtin.file:
     path: "{{ storage_path }}/{{ item }}"
     state: directory
@@ -13,9 +16,17 @@
     group: "{{ pipeline_group }}"
     mode: "0755"
   loop:
-    - inbox
-    - transcripts
+    - inbox        # input: DDP JSONs, read once at ingest
+    - transcripts  # durable sink: sync-to-storage.sh rsyncs here
     - archive
+
+- name: Create boot-disk transcripts work dir (hot path, off the mount)
+  ansible.builtin.file:
+    path: "{{ work_dir }}/transcripts"
+    state: directory
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
+    mode: "0755"
 
 - name: Create native state directory (POSIX fsync for SQLite WAL)
   ansible.builtin.file:
@@ -43,3 +54,14 @@
   vars:
     instance_id: "{{ item }}"
   loop: "{{ range(instance_count | int) | list }}"
+
+- name: Generate storage sync/restore helpers
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ pipeline_home }}/{{ item }}"
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
+    mode: "0755"
+  loop:
+    - sync-to-storage.sh
+    - restore-from-storage.sh

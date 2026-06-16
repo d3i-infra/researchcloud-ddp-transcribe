@@ -1,11 +1,12 @@
 ---
 # Download the whisper models the workspace creator selected. Models live
-# on the storage volume (never the 15 GB boot disk); they are read-once at
-# pipeline startup, so the NFS-like mount is safe for them.
+# on the boot disk (~/ddp-work/models) per ADR 0032: loaded once into VRAM
+# at startup, so a local read is fast and avoids mmap'ing the model over the
+# NFS-like mount. Re-downloaded on each fresh workspace (~1 GB, provision-time).
 
-- name: Ensure models directory on storage
+- name: Ensure models directory on boot disk
   ansible.builtin.file:
-    path: "{{ storage_path }}/models"
+    path: "{{ work_dir }}/models"
     state: directory
     owner: "{{ pipeline_user }}"
     group: "{{ pipeline_group }}"
@@ -14,7 +15,7 @@
 - name: Download selected whisper models
   ansible.builtin.get_url:
     url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{{ item.file }}"
-    dest: "{{ storage_path }}/models/{{ item.file }}"
+    dest: "{{ work_dir }}/models/{{ item.file }}"
     owner: "{{ pipeline_user }}"
     group: "{{ pipeline_group }}"
     mode: "0644"

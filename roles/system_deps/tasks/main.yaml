@@ -21,6 +21,7 @@
       - pciutils
       - pipx
       - pkg-config
+      - rsync
     state: present
     update_cache: true
   register: system_packages

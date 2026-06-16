@@ -23,6 +23,9 @@
     pipeline_home: "{{ getent_passwd[pipeline_user][4] }}"
     pipeline_src_dir: "{{ getent_passwd[pipeline_user][4] }}/src/ddp-transcribe"
     state_dir: "{{ getent_passwd[pipeline_user][4] }}/ddp-state"
+    # Hot working set on the boot disk (POSIX fsync, off the NFS-like mount)
+    # per ADR 0032: whisper model + transcripts_root live here during a batch.
+    work_dir: "{{ getent_passwd[pipeline_user][4] }}/ddp-work"
     # Primary group by gid, NOT the username: SRC-CO provisions users into
     # a CO group (e.g. rsc_co_NNNNNN) with no per-user group.
     pipeline_group: "{{ getent_passwd[pipeline_user][2] }}"

@@ -226,11 +226,15 @@ a leaner box and will never use Research Drive.
    username; check the model boxes you want.
 2. Watch the deployment log to green — **no manual SSH fixes allowed** (that's
    the whole point of the catalog item).
-3. SSH in and verify: `ddp-transcribe --help`; `ldd $(which ddp-transcribe) | grep
-   libcudart`; `ls <storage>/models/`; `ls ~/run-pipeline-gpu0.sh ~/ddp-state/`.
+3. SSH in and verify the ADR 0032 layout: `ddp-transcribe --help`; `ldd $(which
+   ddp-transcribe) | grep libcudart`; `ls ~/ddp-work/models/` (models on the boot
+   disk); `ls ~/run-pipeline-gpu0.sh ~/sync-to-storage.sh ~/restore-from-storage.sh
+   ~/ddp-state/`.
 4. Operator smoke: drop a fixture DDP JSON into `<storage>/inbox`,
    `~/run-pipeline-gpu0.sh init`, `… ingest`, `… process --max-videos 3`,
-   inspect a transcript artifact with `jq`.
+   inspect a transcript artifact (under `~/ddp-work/transcripts/<NN>/`) with `jq`,
+   then confirm the auto-sync landed it on the volume (`ls <storage>/transcripts/<NN>/`
+   and `<storage>/state-snapshot.sqlite`).
 5. Relaunch on **2×A10**: confirm both `~/run-pipeline-gpu0.sh` and
    `-gpu1.sh` exist; run both concurrently; `nvidia-smi` shows load on both GPUs.
    **First real test of two-process claim contention (R11)** — watch for stale
