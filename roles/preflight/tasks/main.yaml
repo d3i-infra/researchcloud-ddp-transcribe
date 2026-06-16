@@ -17,6 +17,17 @@
   ansible.builtin.getent:
     database: passwd
     key: "{{ pipeline_user }}"
+    fail_key: false
+
+- name: Fail clearly if pipeline_user is not a real account
+  ansible.builtin.assert:
+    that:
+      - (getent_passwd[pipeline_user] | default([])) | length > 0
+    fail_msg: >-
+      pipeline_user '{{ pipeline_user }}' is not an account on this workspace.
+      Set the pipeline_user parameter to your actual SRC username — the same
+      name as in storage_path (e.g. the 'dmccool' in /home/dmccool/...) — not
+      the placeholder default.
 
 - name: Record pipeline_user home directory and primary group
   ansible.builtin.set_fact:
