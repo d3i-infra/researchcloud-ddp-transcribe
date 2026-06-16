@@ -170,6 +170,18 @@ and invisible to the user. Make-interactive requires the parameter to be
 Overwritable at the component (all ten are). Litmus test: make it interactive
 only if the value depends on facts known at launch in that specific workspace.
 
+**Make-interactive demands a Label and a Default** (SRC requires a default even
+for interactive fields). For `storage_path` and `pipeline_user` there is no
+correct fixed default, so use a **placeholder template** the creator overwrites
+— it documents the format and, being non-existent, makes preflight fail loudly
+if left unedited (better than a wrong-but-valid path):
+
+- `storage_path` — Label `Storage volume mount path`; Default
+  `/home/<username>/data/<volume-name>`; Description: mount point of the volume
+  attached to this workspace (SRC mounts it at `/home/<user>/data/<volume-name>`).
+- `pipeline_user` — Label `Workspace user`; Default `<your-src-username>`.
+- the three `model_*` flags use genuine `true`/`false` defaults (pre-set the checkboxes).
+
 | Parameter | Source | Action | Value |
 |---|---|---|---|
 | `storage_path` | ddp-transcribe | **Make interactive** | creator supplies the mounted volume path, e.g. `/home/<user>/data/<volume>` |
