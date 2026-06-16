@@ -208,8 +208,15 @@ a leaner box and will never use Research Drive.
 
 ## Tier 5 — validation pass (after Submit)
 
-1. Launch a workspace on **1×A10** with an attached storage volume; supply
-   `storage_path` + `pipeline_user`; check the model boxes you want.
+0. **Create the storage volume first** (it is a separate object, *not* part of
+   this catalog item): SRC portal → CREATE NEW → storage card → SURF HPC Cloud
+   volume → same CO as the workspace → size generously (models + 65k transcripts;
+   more if audio is retained) → name it (e.g. `ddp-transcribe-<study>`).
+1. Launch a workspace on **1×A10**. The **second-to-last wizard step is "Attach
+   the storage volume"** — attach the volume from step 0; SRC-OS mounts it at
+   `~/data/<volume-name>`. Supply the interactive params: `storage_path` =
+   `/home/<pipeline_user>/data/<volume-name>`, `pipeline_user` = your SRC
+   username; check the model boxes you want.
 2. Watch the deployment log to green — **no manual SSH fixes allowed** (that's
    the whole point of the catalog item).
 3. SSH in and verify: `ddp-transcribe --help`; `ldd $(which ddp-transcribe) | grep
