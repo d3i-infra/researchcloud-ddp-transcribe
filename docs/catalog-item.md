@@ -69,7 +69,8 @@ HuggingFace, crates.io) are public/anonymous.
 ```
 1. SRC-OS
 2. SRC-CO
-3. SRC-External
+3. SRC-External plugin  (the plain Ansible runner — NOT "Docker", "Docker
+   Compose", or "pluginansible2.11"; keep its remote_ansible_version at 9.1.0)
 4. ddp-transcribe        ← must come after SRC-External
 ```
 
