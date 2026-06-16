@@ -153,6 +153,13 @@ User-facing (the Catalog tab); keep distinct from the component's Step 2 set.
   - one CPU flavour with high core count (faster cargo build) — e.g. 16 Core - 64 GB
   - **1×A10** GPU flavour
   - **2×A10** GPU flavour (if available — see decisions above)
+- **Boot disk: ~50 GB — do NOT leave it at the 15 GB default.** The provision
+  peak (CUDA toolkit ~5 GB + packages + Rust + the cargo `target/` during the
+  CUDA build) hits ~20–25 GB before `cargo clean`; 15 GB risks an `ENOSPC` build
+  failure. Models/transcripts live on the storage volume, so steady state is
+  ~12–15 GB. Go 80–100 GB only if the pipeline retains audio on the boot disk
+  rather than `~/scratch`. This supersedes the `CARGO_TARGET_DIR=~/scratch`
+  fallback (R2) — a bigger disk removes the cliff with no moving parts.
 
 ## Step G — Parameters (Step 6)
 
