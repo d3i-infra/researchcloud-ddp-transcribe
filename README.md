@@ -11,12 +11,14 @@ SRC-External on the workspace itself.
 
 - System packages (cmake, clang + `libclang-18-dev`, ffmpeg, sqlite3, jq, …)
 - CUDA toolkit — detect-else-install (pinned **13.2** fallback); never kernel
-  drivers. The driver + CUDA **12.6** come from SRC's own **CUDA** component
+  drivers. The driver + CUDA come from SRC's own **CUDA** component
   (`plugin-cuda`), which must precede ddp-transcribe in the catalog item
   (`SRC-OS → SRC-CO → SRC-External → CUDA → ddp-transcribe`): the stock
   `ubuntu-24.04-rsc` image ships no driver, so without it the cuda role
-  hard-fails. When CUDA has run, nvcc is present and this step skips — the
-  build links against SRC's 12.6 (the version proven on the A10 in Tier 3)
+  hard-fails. The component installs NVIDIA's **current** CUDA via the dynamic
+  keyring (13.3 + driver 610 as provisioned — it floats to the latest). When
+  CUDA has run, nvcc is present and our pinned-13.2 step skips, so the build
+  links SRC's version (13.3 builds cleanly; the version is not pinned on SRC)
 - Rust stable (rustup, per-user) and `yt-dlp` (`pipx install
   'yt-dlp[default,curl-cffi]'` — never `pipx inject`)
 - The `ddp-transcribe` release binary, built from a pinned git ref with

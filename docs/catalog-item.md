@@ -117,7 +117,8 @@ are public/anonymous.
    Compose", or "pluginansible2.11"; keep its remote_ansible_version at 9.1.0)
 4. CUDA                 ← SRC's own component (gitlab rsc-surf-nl/plugins/
                           plugin-cuda). Installs a modern NVIDIA driver + CUDA
-                          12.6 from the dynamic ubuntu2404 keyring, gated on
+                          (NVIDIA's *current* via the dynamic ubuntu2404 keyring
+                          — 13.3 + driver 610 as provisioned), gated on
                           `'GPU' in flavour_name`. REQUIRED on GPU flavors: the
                           stock ubuntu-24.04-rsc image ships no driver and
                           SRC-OS/CO don't add one, so without this
@@ -135,11 +136,14 @@ are public/anonymous.
 > component list. On CPU flavors ddp-transcribe's cuda role finds no GPU and
 > builds CPU-only (no `force_cpu_build` needed).
 >
-> **CUDA version:** the CUDA component installs **12.6** (not our pinned 13.2).
-> This is the exact version that was on the A10 in Tier 3, where the build
-> linked CUDA cleanly — so 12.6 is proven. ddp-transcribe's detect-else-install
-> finds nvcc present and skips its 13.2 install, building against 12.6; the
-> 13.2 pin is only a fallback for a hypothetical no-CUDA-component path.
+> **CUDA version (NOT pinned on SRC):** the CUDA component does `apt install
+> cuda` off the dynamic keyring, so it pulls NVIDIA's **current** release —
+> **13.3 + driver 610** as provisioned (Tier 5), which built and linked cleanly.
+> ddp-transcribe's detect-else-install finds nvcc present and skips its pinned
+> 13.2, so the build links whatever SRC installed. **Risk:** the build CUDA
+> floats with NVIDIA's latest; a future release could break the whisper.cpp
+> build. If that bites, force our pinned toolkit (install even when nvcc is
+> present) or pin via the CUDA component. Tracked in FOLLOWUPS.
 
 ## Step C — Name & description
 
