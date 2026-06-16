@@ -156,7 +156,12 @@ User-facing (the Catalog tab); keep distinct from the component's Step 2 set.
 
 ## Step G — Parameters (Step 6)
 
-Wiring per the component README. Action column: Keep / Overwrite / Make-interactive.
+Wiring per the component README. Action column: Keep / Overwrite /
+Make-interactive. **Only Make-interactive prompts the workspace creator** — both
+Keep (component default) and Overwrite (catalog-item value) are fixed at provision
+and invisible to the user. Make-interactive requires the parameter to be
+Overwritable at the component (all ten are). Litmus test: make it interactive
+only if the value depends on facts known at launch in that specific workspace.
 
 | Parameter | Source | Action | Value |
 |---|---|---|---|
