@@ -115,10 +115,28 @@ are public/anonymous.
 2. SRC-CO
 3. SRC-External plugin  (the plain Ansible runner — NOT "Docker", "Docker
    Compose", or "pluginansible2.11"; keep its remote_ansible_version at 9.1.0)
-4. ddp-transcribe        ← must come after SRC-External
+4. CUDA                 ← SRC's own component; installs the NVIDIA driver +
+                          toolkit. REQUIRED on GPU flavors: the stock
+                          ubuntu-24.04-rsc image ships no driver and SRC-OS/CO
+                          don't add one, so without this ddp-transcribe's cuda
+                          role hard-fails (GPU on PCI bus, nvidia-smi absent).
+                          Must come after SRC-External.
+5. ddp-transcribe        ← after CUDA; its cuda role then sees nvidia-smi work,
+                          finds nvcc present, and skips its own toolkit install.
 ```
 
 **No SRC-Nginx** — the pipeline has no web UI; access is SSH only.
+
+> **CPU flavor caveat:** SRC's CUDA component "only works with flavours labelled
+> GPU." If you keep a CPU flavor selectable on this item, verify the CUDA
+> component no-ops (rather than fails) on it, or offer GPU flavors only — the
+> production 1M workload is GPU anyway, and `force_cpu_build` covers CPU dev.
+>
+> **CUDA version caveat:** SRC's CUDA component installs NVIDIA's *current*
+> CUDA, not our validated 13.2. ddp-transcribe's detect-else-install defers to
+> whatever SRC installed (skips its pinned 13.2 when nvcc is present), so the
+> build uses SRC's version — confirm the build succeeds and `ldd` shows
+> libcudart on first GPU provision.
 
 ## Step C — Name & description
 

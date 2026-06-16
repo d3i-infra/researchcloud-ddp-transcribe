@@ -10,8 +10,12 @@ SRC-External on the workspace itself.
 ## What it provisions
 
 - System packages (cmake, clang + `libclang-18-dev`, ffmpeg, sqlite3, jq, …)
-- CUDA toolkit **13.2** — detect-else-install; never kernel drivers (the GPU
-  flavor image must ship those; the playbook hard-fails otherwise)
+- CUDA toolkit **13.2** — detect-else-install; never kernel drivers. The driver
+  comes from SRC's own **CUDA** component, which must precede ddp-transcribe in
+  the catalog item (`SRC-OS → SRC-CO → SRC-External → CUDA → ddp-transcribe`):
+  the stock `ubuntu-24.04-rsc` image ships no driver, so without it the cuda
+  role hard-fails. When CUDA has run, nvcc is present and this step skips
+  (so the build uses SRC's CUDA version, not necessarily our pinned 13.2)
 - Rust stable (rustup, per-user) and `yt-dlp` (`pipx install
   'yt-dlp[default,curl-cffi]'` — never `pipx inject`)
 - The `ddp-transcribe` release binary, built from a pinned git ref with

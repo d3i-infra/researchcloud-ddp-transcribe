@@ -1,9 +1,12 @@
 ---
 # Detect GPU/driver state and install the CUDA *toolkit* if (and only if)
-# a working driver is present and nvcc is missing. This role never
-# installs kernel drivers: a driver install mid-provision can require a
-# reboot, which SRC-External cannot survive. SRC GPU flavor images are
-# expected to ship the driver.
+# a working driver is present and nvcc is missing. This role never installs
+# kernel drivers: a driver install mid-provision can require a reboot, which
+# SRC-External cannot survive. The driver is provided by SRC's own **CUDA
+# component**, which must precede ddp-transcribe in the catalog item
+# (SRC-OS -> SRC-CO -> SRC-External -> CUDA -> ddp-transcribe). The stock
+# ubuntu-24.04-rsc image does NOT ship the driver. When SRC's CUDA component
+# has run, nvcc is already present and the install tasks below skip.
 
 - name: Detect NVIDIA hardware
   ansible.builtin.shell: lspci | grep -iq nvidia
@@ -22,8 +25,11 @@
     msg: >-
       An NVIDIA GPU is visible on the PCI bus but nvidia-smi is absent or
       failing. This playbook deliberately never installs kernel drivers
-      (reboot hazard mid-provision). Use a GPU flavor image that ships the
-      NVIDIA driver, or install the driver manually, reboot, and re-run.
+      (reboot hazard mid-provision). Add SRC's **CUDA** component to the
+      catalog item BEFORE ddp-transcribe (SRC-OS -> SRC-CO -> SRC-External ->
+      CUDA -> ddp-transcribe); it installs the driver + toolkit. The stock
+      ubuntu-24.04-rsc image does not ship the driver. (Set force_cpu_build
+      to build a CPU-only binary instead.)
   when: >-
     lspci_nvidia.rc == 0 and nvidia_smi.rc != 0
     and not (force_cpu_build | bool)
