@@ -56,21 +56,33 @@ appear at the catalog item's Parameters step (a param "not explicitly required b
 a component has no effect"). Declare exactly these (defaults match the playbook's
 `vars:`; the two without a default are required):
 
-| Parameter | Type | Default | Required |
-|---|---|---|---|
-| `storage_path` | string | *(none)* | **yes** |
-| `pipeline_user` | string | *(none)* | **yes** |
-| `model_large_v3_turbo` | boolean | `true` | no |
-| `model_tiny_en` | boolean | `false` | no |
-| `model_small` | boolean | `false` | no |
-| `pipeline_git_ref` | string | `v0.2.0-rc1` | no |
-| `download_workers` | integer | `3` | no |
-| `compute_lang_probs` | boolean | `false` | no |
-| `run_smoke_test` | boolean | `false` | no |
-| `force_cpu_build` | boolean | `false` | no |
+Each declaration has a **Source type** (`Fixed` / `Resource` / `Co-Secret` /
+`Workspace`) and an **Overwritable** checkbox. For all ten of ours: Source type
+= **`Fixed`** (a literal value you type) and **Overwritable = checked** — the
+Overwritable flag is what lets the catalog item later "Make interactive" or
+"Overwrite"; unchecked locks the value at the component default.
 
-Declare the model flags as **boolean** so they render as checkboxes when made
-interactive. Do *not* declare `co_passwordless_sudo` / `timeout` /
+| Parameter | Source type | Default value | Overwritable |
+|---|---|---|---|
+| `storage_path` | Fixed | *(leave blank — required at launch)* | ✓ |
+| `pipeline_user` | Fixed | *(leave blank — required at launch)* | ✓ |
+| `model_large_v3_turbo` | Fixed | `true` | ✓ |
+| `model_tiny_en` | Fixed | `false` | ✓ |
+| `model_small` | Fixed | `false` | ✓ |
+| `pipeline_git_ref` | Fixed | `v0.2.0-rc1` | ✓ |
+| `download_workers` | Fixed | `3` | ✓ |
+| `compute_lang_probs` | Fixed | `false` | ✓ |
+| `run_smoke_test` | Fixed | `false` | ✓ |
+| `force_cpu_build` | Fixed | `false` | ✓ |
+
+`storage_path`/`pipeline_user` "required-ness" is enforced by making them
+interactive at the catalog item **and** the playbook's preflight `assert`
+backstop. The model flags' `true`/`false` values render as checkboxes once made
+interactive (the playbook coerces with `| bool`). Other source types are unused:
+`Co-Secret` (we have no secrets), `Resource`, `Workspace` (could in principle
+inject `pipeline_user` from the workspace user — not relied on; matches the d3i
+"Next" item's interactive-username pattern). Do *not* declare
+`co_passwordless_sudo` / `timeout` /
 `remote_ansible_version` here — those belong to SRC-CO and SRC-External plugin
 and surface at the catalog item Parameters step on their own. Internals
 (`pipeline_git_repo`, `cuda_*`) stay as playbook vars, undeclared. No Component
