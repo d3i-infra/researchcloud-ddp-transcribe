@@ -79,9 +79,11 @@ Overwritable flag is what lets the catalog item later "Make interactive" or
 interactive at the catalog item **and** the playbook's preflight `assert`
 backstop. The model flags' `true`/`false` values render as checkboxes once made
 interactive (the playbook coerces with `| bool`). Other source types are unused:
-`Co-Secret` (we have no secrets), `Resource`, `Workspace` (could in principle
-inject `pipeline_user` from the workspace user — not relied on; matches the d3i
-"Next" item's interactive-username pattern). Do *not* declare
+`Co-Secret` (we have no secrets), `Resource`, and `Workspace` — note `Workspace`
+exposes only `co_id` / `co_name` / `co_irods`, **no per-user name**, so it
+*cannot* supply `pipeline_user` (a CO workspace has many users; the owning
+account must be chosen explicitly). `pipeline_user` stays Fixed + interactive,
+matching the d3i "Next" item's interactive-username pattern. Do *not* declare
 `co_passwordless_sudo` / `timeout` /
 `remote_ansible_version` here — those belong to SRC-CO and SRC-External plugin
 and surface at the catalog item Parameters step on their own. Internals
