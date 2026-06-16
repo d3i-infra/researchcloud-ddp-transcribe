@@ -23,19 +23,45 @@ These are portal facts I can't see; settle them first.
 ## Step A — Register the component (Development → Components → +)
 
 The component is created **before** the catalog item (a non-SURF component can't
-be added to an item until it exists).
+be added to an item until it exists). The "Add component" wizard has 5 steps.
+
+**Step 1 — script source:**
 
 | Field | Value |
 |---|---|
-| Type | Ansible (run by SRC-External) |
-| Git repo | `https://github.com/d3i-infra/researchcloud-ddp-transcribe` |
-| Playbook / entry | `deploy-ddp-transcribe.yaml` (repo root) |
-| Version created | development (promote later — see end) |
-| Visibility | **restrict to the owner CO** — component visibility *cannot be withdrawn*, so do not make it public |
+| Component script type | Ansible Playbook |
+| Source Url repository | `https://github.com/d3i-infra/researchcloud-ddp-transcribe.git` |
+| Path | `deploy-ddp-transcribe.yaml` |
+| Tag | `main` — *version of the **component repo** SRC clones; distinct from the `pipeline_git_ref` parameter, which pins the **pipeline repo** the playbook builds* |
+| Access format / label | leave blank (no web UI — SSH only) |
+| Script availability | "publicly available on Git" if the component repo is public; else fixed / CO-secret credentials |
 
-The component declares the parameters in Step F's table. No Component Secrets:
-the pipeline repo and all downloads (NVIDIA repo, HuggingFace, crates.io) are
-public/anonymous.
+**Step 2 — name, subtitle, description** (developer-facing; the catalog item has
+its own user-facing set in Step C):
+
+- **Name:** `ddp-transcribe`
+- **Subtitle:** Provisions a video-transcription pipeline workspace (CUDA, Rust, yt-dlp, whisper models)
+- **Description:** Ansible playbook that bakes a `ddp-transcribe` workspace.
+  **Base OS: Ubuntu 24.04** (the `libclang-18-dev` pin is 24.04-specific). Builds
+  the pipeline from a pinned git ref with whisper-rs (`--features cuda` on GPU
+  flavours), installs `yt-dlp[curl-cffi]` and the selected whisper models, lays
+  out inbox/transcripts/archive on the attached volume and the state DB on the
+  boot disk. CUDA toolkit 13.2 is detect-else-install; never installs drivers.
+  Operator-driven, SSH only.
+
+**Step 3 — parameters:** declared per the README; wired by the catalog item in
+Step G. No Component Secrets — the pipeline repo and all downloads (NVIDIA repo,
+HuggingFace, crates.io) are public/anonymous.
+
+**Step 4 — owner & support:** owner CO (see decisions above), support url/name/email.
+
+**Step 5 — organizations:** **restrict to the owner CO** — component visibility
+*cannot be withdrawn*, so do not make it public.
+
+> **Two version pins, don't confuse them:** the Step 1 **Tag** pins the component
+> repo (`main`); the `pipeline_git_ref` parameter pins the pipeline repo
+> (`v0.2.0-rc1`). A provisioning-only fix changes the component (re-clone `main`,
+> re-run); a pipeline release changes `pipeline_git_ref` (rebuild).
 
 ## Step B — Catalog item wizard, Step 1: Components (order matters)
 
@@ -50,9 +76,15 @@ public/anonymous.
 
 ## Step C — Name & description
 
+User-facing (the Catalog tab); keep distinct from the component's Step 2 set.
+
 - **Name:** DDP Transcribe
-- **Subtitle:** _(short — e.g. "Video transcription pipeline for data-donation studies")_
-- **Description:** _(what it provisions; point at the component README)_
+- **Subtitle:** Video transcription pipeline for data-donation studies
+- **Description:** A ready-to-run workspace that transcribes donor-watched
+  videos from TikTok DDP exports. Whisper.cpp transcription (GPU-accelerated on
+  NVIDIA flavours); select your models at launch and point it at an attached
+  storage volume. SSH in and drive it with the generated run scripts
+  (`init` / `ingest` / `process`).
 
 ## Step D — Owner & support
 
