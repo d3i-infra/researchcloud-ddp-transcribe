@@ -115,28 +115,31 @@ are public/anonymous.
 2. SRC-CO
 3. SRC-External plugin  (the plain Ansible runner — NOT "Docker", "Docker
    Compose", or "pluginansible2.11"; keep its remote_ansible_version at 9.1.0)
-4. CUDA                 ← SRC's own component; installs the NVIDIA driver +
-                          toolkit. REQUIRED on GPU flavors: the stock
-                          ubuntu-24.04-rsc image ships no driver and SRC-OS/CO
-                          don't add one, so without this ddp-transcribe's cuda
-                          role hard-fails (GPU on PCI bus, nvidia-smi absent).
-                          Must come after SRC-External.
+4. CUDA                 ← SRC's own component (gitlab rsc-surf-nl/plugins/
+                          plugin-cuda). Installs a modern NVIDIA driver + CUDA
+                          12.6 from the dynamic ubuntu2404 keyring, gated on
+                          `'GPU' in flavour_name`. REQUIRED on GPU flavors: the
+                          stock ubuntu-24.04-rsc image ships no driver and
+                          SRC-OS/CO don't add one, so without this
+                          ddp-transcribe's cuda role hard-fails (GPU on PCI bus,
+                          nvidia-smi absent). Must come after SRC-External; it
+                          reboots (handled via async + wait_for_connection).
 5. ddp-transcribe        ← after CUDA; its cuda role then sees nvidia-smi work,
                           finds nvcc present, and skips its own toolkit install.
 ```
 
 **No SRC-Nginx** — the pipeline has no web UI; access is SSH only.
 
-> **CPU flavor caveat:** SRC's CUDA component "only works with flavours labelled
-> GPU." If you keep a CPU flavor selectable on this item, verify the CUDA
-> component no-ops (rather than fails) on it, or offer GPU flavors only — the
-> production 1M workload is GPU anyway, and `force_cpu_build` covers CPU dev.
+> **CPU flavor:** the CUDA component self-gates on `'GPU' in flavour_name`, so it
+> cleanly no-ops on the CPU flavor — a mixed CPU/1×A10/2×A10 item is fine on one
+> component list. On CPU flavors ddp-transcribe's cuda role finds no GPU and
+> builds CPU-only (no `force_cpu_build` needed).
 >
-> **CUDA version caveat:** SRC's CUDA component installs NVIDIA's *current*
-> CUDA, not our validated 13.2. ddp-transcribe's detect-else-install defers to
-> whatever SRC installed (skips its pinned 13.2 when nvcc is present), so the
-> build uses SRC's version — confirm the build succeeds and `ldd` shows
-> libcudart on first GPU provision.
+> **CUDA version:** the CUDA component installs **12.6** (not our pinned 13.2).
+> This is the exact version that was on the A10 in Tier 3, where the build
+> linked CUDA cleanly — so 12.6 is proven. ddp-transcribe's detect-else-install
+> finds nvcc present and skips its 13.2 install, building against 12.6; the
+> 13.2 pin is only a fallback for a hypothetical no-CUDA-component path.
 
 ## Step C — Name & description
 
