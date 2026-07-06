@@ -51,10 +51,12 @@
     yoda_user: ""
     # GoCommands release to install (static binary; no apt/admin). Pinned like
     # the CUDA toolkit — bump only against a verified gocmd/iRODS-4.3.4 combo.
-    # VERIFY the tag exists at github.com/cyverse/gocommands/releases.
-    gocmd_version: "v0.10.6"
+    gocmd_version: "v0.12.2"
     gocmd_release_base: "https://github.com/cyverse/gocommands/releases/download"
     gocmd_url: "{{ gocmd_release_base }}/{{ gocmd_version }}/gocmd-{{ gocmd_version }}-linux-amd64.tar.gz"
+    # PAM token lifetime (hours) passed to `gocmd init`; size to batch length.
+    # Yoda's server may cap this (validate at Tier 3).
+    yoda_auth_ttl_hours: 720
     download_workers: 3
     compute_lang_probs: false
     run_smoke_test: false

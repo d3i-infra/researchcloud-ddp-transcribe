@@ -34,28 +34,36 @@ repo's `docs/FOLLOWUPS.md`.)
 - **`scripts/tier2-docker.sh` "run 2 recap:" echo prints empty.** Cosmetic; the
   changed-count extraction still works. Fix when next touching the script.
 
-- **Yoda backend: verify gocmd version, asset name, and non-interactive auth on
-  a real workspace.** The `yoda` role pins `gocmd_version` and assumes the
-  release asset `gocmd-<ver>-linux-amd64.tar.gz` extracts `gocmd` at top level,
-  and that `gocmd init` reads the data-access password from stdin. All three are
-  marked `VERIFY` in `roles/yoda/tasks/main.yaml` — none could be exercised here
-  (no gocmd binary / iRODS reachability in the dev env). Confirm at Tier 3/4 on
-  an SRC workspace with a real data-access password; adjust the `-p`/env-var
-  auth form or `--strip-components` if needed.
+- **Yoda backend: two small runtime confirmations remain (most VERIFYs cleared).**
+  A live round-trip against UU Yoda (`fsw.data.uu.nl`, gocmd v0.12.2) confirmed:
+  the asset `gocmd-<ver>-linux-amd64.tar.gz` extracts a top-level `gocmd`; auth
+  works over `pam_password` with a data-access password; `gocmd ls`/`sync`/`put`
+  behave as the role/script assume; and the full `push`→`pull` round-trip is
+  byte-identical. Still to confirm at Tier 3 (needs the Co-Secret path, not just
+  a dev box): (1) the **env-var** auth (`IRODS_USER_PASSWORD`) completes
+  `gocmd init` **non-interactively** under Ansible (verified via the binary's
+  embedded `envconfig` tag + `--help`, not yet run headless), and (2) Yoda
+  accepts the requested `--ttl` (see next item).
 
-- **Yoda data-access-password (PAM) token TTL vs. multi-day batches.** The `yoda`
-  role caches auth once (`creates: ~/.irods/.irodsA`) so re-provisioning is
-  idempotent — but a Yoda data-access password / PAM token expires. A batch that
-  outlives the token will fail its next `sync-to-storage.sh`. Confirm the TTL and,
-  if short relative to batch length, add a re-auth step (or `gocmd` auto-refresh)
-  to the run scripts. Until then: operator re-runs `gocmd init` when a push fails.
+- **Yoda PAM token TTL — now a lever, verify the server cap.** `gocmd init --ttl
+  <hours>` sets the token lifetime; the role passes `yoda_auth_ttl_hours` (default
+  720). Confirm at Tier 3 that Yoda's server does not cap it lower (if it errors,
+  lower the value). The `creates: ~/.irods/.irodsA` sentinel means an expired
+  token won't refresh on a plain re-run — operator re-runs `gocmd init` if a batch
+  outlives the token.
 
-- **Per-shard bundling for the 1M-file campaign.** `yoda-sync.sh` uses `gocmd
-  sync` (checksummed, symmetric) which is right for pilot-scale delivery. At ~1M
-  transcripts / ~100 shards (~10k files/shard) the per-file listing/transfer cost
-  grows and iRODS collection cardinality gets large. Add a per-shard `tar` bundle
-  path (bundle on push, untar on pull) gated behind an env flag once real
-  throughput is measured; decide bundle-vs-`gocmd sync --diff` by measurement.
+- **Yoda push requires the collection base to pre-exist.** `gocmd sync SRC DEST`
+  is dual-mode: if DEST exists it creates `DEST/basename(SRC)`; if DEST does
+  *not* exist it creates DEST and syncs the contents in (DEST becomes SRC). The
+  script relies on `yoda_collection` (the researcher's group root) existing — it
+  always does in production. If a future flow targets a fresh sub-collection,
+  `gocmd mkdir` it first.
+
+- **1M-file scale: use gocmd's native bundling, not hand-rolled tar.** `gocmd
+  sync` has built-in `--bulk_upload` (`--max_bundle_size` / `--max_file_num`);
+  `yoda-sync.sh` exposes it via `YODA_BULK=1`. For the 1M-transcript / ~100-shard
+  campaign, enable it and tune the bundle knobs once real throughput is measured
+  (pilot-scale delivery is fine without it).
 
 - **`research-drive` backend is a reserved stub.** The selector accepts it but
   `preflight` hard-fails with guidance (mount + use `src-volume`, or use `yoda`).

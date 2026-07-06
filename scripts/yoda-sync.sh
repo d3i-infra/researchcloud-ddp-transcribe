@@ -34,9 +34,13 @@ irods() { printf 'i:%s' "$1"; }
 
 push_transcripts() {
   : "${YODA_TRANSCRIPTS_LOCAL:?set YODA_TRANSCRIPTS_LOCAL}"
-  echo "[yoda-sync] push transcripts: ${YODA_TRANSCRIPTS_LOCAL} -> ${YODA_COLLECTION}/transcripts"
-  gocmd mkdir -p "$(irods "${YODA_COLLECTION}/transcripts")" 2>/dev/null || true
-  gocmd sync "${YODA_TRANSCRIPTS_LOCAL}/" "$(irods "${YODA_COLLECTION}/transcripts")"
+  echo "[yoda-sync] push transcripts: ${YODA_TRANSCRIPTS_LOCAL} -> ${YODA_COLLECTION}/$(basename "${YODA_TRANSCRIPTS_LOCAL}")"
+  # `gocmd sync SRC DEST` creates DEST/basename(SRC) (it appends the source dir
+  # name and ignores a trailing slash), and creates the target itself — so
+  # target the collection base, not <base>/transcripts, or you get a doubled
+  # transcripts/transcripts path. Set YODA_BULK=1 to enable gocmd's native
+  # bundling (--bulk_upload) for the 1M-file campaign.
+  gocmd sync ${YODA_BULK:+--bulk_upload} "${YODA_TRANSCRIPTS_LOCAL}" "$(irods "${YODA_COLLECTION}")"
 }
 
 push_state() {
@@ -51,9 +55,12 @@ push_state() {
 
 pull_inbox() {
   : "${YODA_INBOX_LOCAL:?set YODA_INBOX_LOCAL}"
-  mkdir -p "${YODA_INBOX_LOCAL}"
+  # gocmd sync appends basename(SRC) to DEST, so sync the remote inbox INTO the
+  # parent dir; it lands as <parent>/inbox == YODA_INBOX_LOCAL.
+  local parent; parent="$(dirname "${YODA_INBOX_LOCAL}")"
+  mkdir -p "${parent}"
   echo "[yoda-sync] pull inbox: ${YODA_COLLECTION}/inbox -> ${YODA_INBOX_LOCAL}"
-  gocmd sync "$(irods "${YODA_COLLECTION}/inbox")" "${YODA_INBOX_LOCAL}/"
+  gocmd sync "$(irods "${YODA_COLLECTION}/inbox")" "${parent}"
 }
 
 pull_resume() {
@@ -63,9 +70,12 @@ pull_resume() {
       || echo "[yoda-sync] no state snapshot in collection — fresh batch"
   fi
   if [ -n "${YODA_TRANSCRIPTS_LOCAL:-}" ]; then
-    mkdir -p "${YODA_TRANSCRIPTS_LOCAL}"
+    # Same basename-append rule: sync INTO the parent so it lands as
+    # <parent>/transcripts == YODA_TRANSCRIPTS_LOCAL.
+    local parent; parent="$(dirname "${YODA_TRANSCRIPTS_LOCAL}")"
+    mkdir -p "${parent}"
     echo "[yoda-sync] pull transcripts -> ${YODA_TRANSCRIPTS_LOCAL}"
-    gocmd sync "$(irods "${YODA_COLLECTION}/transcripts")" "${YODA_TRANSCRIPTS_LOCAL}/" \
+    gocmd sync "$(irods "${YODA_COLLECTION}/transcripts")" "${parent}" \
       || echo "[yoda-sync] no transcripts in collection yet"
   fi
 }
