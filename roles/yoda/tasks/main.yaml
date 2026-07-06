@@ -16,9 +16,8 @@
     owner: root
     group: root
     creates: /usr/local/bin/gocmd
-  # VERIFY on a real workspace: the release asset name/arch (amd64 vs x86_64)
-  # and that the tarball extracts `gocmd` at the top level. If it nests under a
-  # versioned dir, add `extra_opts: [--strip-components=1]`.
+  # Confirmed against v0.12.2: asset is gocmd-<ver>-linux-amd64.tar.gz and the
+  # tarball extracts a single top-level `gocmd` (no strip-components needed).
 
 - name: Ensure ~/.irods exists for pipeline_user
   become_user: "{{ pipeline_user }}"
@@ -36,17 +35,19 @@
 
 - name: Cache Yoda auth token from the data-access password
   become_user: "{{ pipeline_user }}"
-  ansible.builtin.command: gocmd init
+  ansible.builtin.command: "gocmd init --ttl {{ yoda_auth_ttl_hours }}"
   args:
-    # Feed the data-access password on stdin (iinit-style). Host/zone/user come
-    # from irods_environment.json, so only the password is needed here.
-    stdin: "{{ yoda_data_access_password }}"
     creates: "{{ pipeline_home }}/.irods/.irodsA"
+  environment:
+    # gocmd reads the password from IRODS_USER_PASSWORD (confirmed: the binary
+    # embeds envconfig:"IRODS_USER_PASSWORD"); host/zone/user come from
+    # irods_environment.json. --ttl sets the PAM token lifetime in hours.
+    IRODS_USER_PASSWORD: "{{ yoda_data_access_password }}"
   no_log: true
-  # VERIFY gocmd's non-interactive auth against {{ gocmd_version }}: some builds
-  # read the env var IRODS_USER_PASSWORD or take `-p` instead of stdin. The
-  # `creates` sentinel makes this idempotent — but an EXPIRED PAM token will NOT
-  # refresh on re-run (see docs/FOLLOWUPS.md: token TTL vs multi-day batches).
+  # The `creates` sentinel keeps this idempotent; an EXPIRED PAM token will NOT
+  # refresh on re-run — size yoda_auth_ttl_hours to your batch length, or re-run
+  # `gocmd init` by hand. VERIFY at Tier 3 that Yoda accepts the requested TTL
+  # (the server may cap it) and that the env-var auth completes non-interactively.
 
 - name: Verify the Yoda collection is reachable
   become_user: "{{ pipeline_user }}"
