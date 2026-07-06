@@ -33,3 +33,37 @@ repo's `docs/FOLLOWUPS.md`.)
 
 - **`scripts/tier2-docker.sh` "run 2 recap:" echo prints empty.** Cosmetic; the
   changed-count extraction still works. Fix when next touching the script.
+
+- **Yoda backend: verify gocmd version, asset name, and non-interactive auth on
+  a real workspace.** The `yoda` role pins `gocmd_version` and assumes the
+  release asset `gocmd-<ver>-linux-amd64.tar.gz` extracts `gocmd` at top level,
+  and that `gocmd init` reads the data-access password from stdin. All three are
+  marked `VERIFY` in `roles/yoda/tasks/main.yaml` — none could be exercised here
+  (no gocmd binary / iRODS reachability in the dev env). Confirm at Tier 3/4 on
+  an SRC workspace with a real data-access password; adjust the `-p`/env-var
+  auth form or `--strip-components` if needed.
+
+- **Yoda data-access-password (PAM) token TTL vs. multi-day batches.** The `yoda`
+  role caches auth once (`creates: ~/.irods/.irodsA`) so re-provisioning is
+  idempotent — but a Yoda data-access password / PAM token expires. A batch that
+  outlives the token will fail its next `sync-to-storage.sh`. Confirm the TTL and,
+  if short relative to batch length, add a re-auth step (or `gocmd` auto-refresh)
+  to the run scripts. Until then: operator re-runs `gocmd init` when a push fails.
+
+- **Per-shard bundling for the 1M-file campaign.** `yoda-sync.sh` uses `gocmd
+  sync` (checksummed, symmetric) which is right for pilot-scale delivery. At ~1M
+  transcripts / ~100 shards (~10k files/shard) the per-file listing/transfer cost
+  grows and iRODS collection cardinality gets large. Add a per-shard `tar` bundle
+  path (bundle on push, untar on pull) gated behind an env flag once real
+  throughput is measured; decide bundle-vs-`gocmd sync --diff` by measurement.
+
+- **`research-drive` backend is a reserved stub.** The selector accepts it but
+  `preflight` hard-fails with guidance (mount + use `src-volume`, or use `yoda`).
+  Wiring it means a WebDAV mount (davfs/rclone) → the existing rsync path, and it
+  carries the same no-checksum corruption caveat as Yoda-over-WebDAV at 1M files.
+
+- **Tier-1 `ansible-lint` cannot run in the committed `.venv` under Python 3.14.**
+  `ansible==9.1.0` (ansible-core 2.16.18, matched to SRC-External) is rejected by
+  `ansible-compat` on Python 3.14 (needs core ≥ 2.20). `yamllint` and
+  `ansible-playbook --syntax-check` still run. Rebuild the venv with Python
+  ≤ 3.12 for the full Tier-1 lint, or run lint in the Tier-2 container.

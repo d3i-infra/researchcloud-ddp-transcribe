@@ -46,8 +46,13 @@ window. A rebuilt workspace resumes a batch via `~/restore-from-storage.sh`.
 
 | Parameter | Default | Catalog action | Meaning |
 |---|---|---|---|
-| `storage_path` | *(required)* | interactive | Mount point of the attached storage volume, e.g. `/home/<user>/data/<volume>` |
+| `storage_path` | *(required for mount backends)* | interactive | Mount point of the attached storage volume, e.g. `/home/<user>/data/<volume>`. Required for `src-volume`; unused for `yoda` |
 | `pipeline_user` | *(required)* | interactive | Workspace user that owns run scripts, source tree, and state dir |
+| `storage_backend` | `src-volume` | interactive | Durable backend: `src-volume` (mount, rsync), `yoda` (iRODS via GoCommands), `research-drive` (reserved) |
+| `yoda_collection` | *(yoda only)* | interactive | iRODS collection base, e.g. `/nluu10p/home/research-foo` |
+| `yoda_user` | *(yoda only)* | interactive | Yoda username, e.g. `exampleuser@uu.nl` |
+| `yoda_host` / `yoda_zone` | `fsw.data.uu.nl` / `nluu10p` | keep | iRODS host/zone (UU defaults) |
+| `yoda_data_access_password` | *(Co-Secret)* | Co-Secret | Yoda data-access password (Yoda web portal → Data Transfer); yoda backend only |
 | `pipeline_git_ref` | `v0.2.0-rc1` | keep (overwrite to upgrade) | Pinned tag/ref of ddp-transcribe to build |
 | `model_large_v3_turbo` | `true` | interactive | Download `ggml-large-v3-turbo-q5_0.bin` (~573 MB; production model) |
 | `model_tiny_en` | `false` | interactive | Download `ggml-tiny.en.bin` (~75 MB; smoke/dev) |
@@ -58,6 +63,37 @@ window. A rebuilt workspace resumes a batch via `~/restore-from-storage.sh`.
 | `force_cpu_build` | `false` | keep | Build without the `cuda` feature even on a GPU flavor; also bypasses the GPU-without-driver hard-fail (debug aid, and used by the Tier 2 container test where the host GPU leaks into `lspci`) |
 
 Booleans may arrive from SRC as strings; the playbook coerces with `| bool`.
+
+## Storage backends
+
+`storage_backend` selects how the durable seed/sink side (ADR 0032) is reached.
+The transcription hot path is always the boot disk; only the durable side differs.
+
+- **`src-volume`** (default) — an SRC-attached block volume mounted at
+  `storage_path`; seed/sink via `rsync` + `sqlite3 .backup`. A mounted SURF
+  Research Drive works here too (just a different mount point).
+- **`yoda`** — a Yoda (iRODS) collection reached via GoCommands (`gocmd`), no
+  mount. The `yoda` role installs `gocmd`, writes `~/.irods/irods_environment.json`,
+  and caches auth from the data-access password (`Co-Secret`). Seed/sink go
+  through `~/yoda-sync.sh` (checksummed `gocmd sync`): `restore-from-storage.sh`
+  pulls the inbox + state + transcripts; `sync-to-storage.sh` pushes transcripts
+  + a state snapshot. Because there is no mount, the inbox is pulled to
+  `~/ddp-work/inbox` and the run scripts read `--inbox` from there.
+- **`research-drive`** — reserved; `preflight` hard-fails with guidance until the
+  WebDAV mount is wired (see `docs/FOLLOWUPS.md`).
+
+**Delivering transcripts to a researcher's Yoda from a dev machine** reuses the
+same script — no SRC needed:
+
+```sh
+gocmd init                                  # once: paste the data-access password
+YODA_COLLECTION=/nluu10p/home/research-foo \
+YODA_TRANSCRIPTS_LOCAL=./transcripts \
+  scripts/yoda-sync.sh push-transcripts     # checksummed upload to <collection>/transcripts
+```
+
+See `docs/storage-backends.md` for the design rationale (why GoCommands over
+WebDAV, the ports-and-adapters boundary with the pipeline repo).
 
 ## Developing / verifying without SRC
 
@@ -84,5 +120,6 @@ deployment plan's Tier 3/4).
 - Every role is idempotent; a re-run on a provisioned workspace must report
   zero changes.
 - CUDA toolkit version is pinned (`cuda_toolkit_package`); bump it only
-  together with a verified whisper-rs/driver combination (see
-  ddp-transcribe `docs/SRC-BAKE-NOTES.md` for the evidence trail).
+  together with a verified whisper-rs/driver combination (validated against the
+  operator's private bake record — ask the pipeline maintainer for the evidence
+  trail).

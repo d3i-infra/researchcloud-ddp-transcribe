@@ -1,17 +1,53 @@
 ---
 # Fail fast on missing/invalid required parameters, before any apt churn.
 
-- name: Require storage_path and pipeline_user parameters
+- name: Validate storage_backend
+  ansible.builtin.assert:
+    that:
+      - storage_backend in ['src-volume', 'yoda', 'research-drive']
+    fail_msg: >-
+      storage_backend '{{ storage_backend }}' is invalid. Choose one of:
+      src-volume (SRC-attached / Research Drive mount, rsync), yoda (iRODS
+      collection via GoCommands), research-drive (reserved).
+
+- name: Reject research-drive backend (reserved, not yet wired)
+  ansible.builtin.fail:
+    msg: >-
+      storage_backend 'research-drive' is not yet implemented. Mount the
+      Research Drive and use the src-volume backend (rsync to its mount point),
+      or use the yoda backend. Tracking: docs/FOLLOWUPS.md.
+  when: storage_backend == 'research-drive'
+
+- name: Require pipeline_user parameter
+  ansible.builtin.assert:
+    that:
+      - pipeline_user is defined
+      - pipeline_user | length > 0
+    fail_msg: >-
+      Required parameter missing: pipeline_user (workspace user that owns the
+      run layout) must be set.
+
+- name: Require storage_path for mount backends
   ansible.builtin.assert:
     that:
       - storage_path is defined
       - storage_path | length > 0
-      - pipeline_user is defined
-      - pipeline_user | length > 0
     fail_msg: >-
-      Required parameters missing: storage_path (mount point of the attached
-      storage volume) and pipeline_user (workspace user that owns the run
-      layout) must both be set.
+      Required parameter missing: storage_path (mount point of the attached
+      storage volume) must be set for the '{{ storage_backend }}' backend.
+  when: storage_backend != 'yoda'
+
+- name: Require Yoda parameters for the yoda backend
+  ansible.builtin.assert:
+    that:
+      - yoda_collection | default('') | length > 0
+      - yoda_user | default('') | length > 0
+      - yoda_data_access_password | default('') | length > 0
+    fail_msg: >-
+      The yoda backend requires yoda_collection (iRODS collection base path),
+      yoda_user (Yoda username), and yoda_data_access_password (Co-Secret).
+  no_log: true
+  when: storage_backend == 'yoda'
 
 - name: Look up pipeline_user account
   ansible.builtin.getent:
@@ -41,15 +77,18 @@
     # a CO group (e.g. rsc_co_NNNNNN) with no per-user group.
     pipeline_group: "{{ getent_passwd[pipeline_user][2] }}"
 
-- name: Check storage_path exists
+- name: Check storage_path exists (mount backends only)
   ansible.builtin.stat:
     path: "{{ storage_path }}"
   register: storage_stat
+  when: storage_backend != 'yoda'
 
-- name: Fail if storage_path is not a directory
+- name: Fail if storage_path is not a directory (mount backends only)
   ansible.builtin.fail:
     msg: >-
       storage_path '{{ storage_path }}' does not exist or is not a directory.
       Attach an external storage volume to the workspace and pass its mount
       point (typically /home/<user>/data/<volume-name>).
-  when: not storage_stat.stat.exists or not storage_stat.stat.isdir
+  when:
+    - storage_backend != 'yoda'
+    - not storage_stat.stat.exists or not storage_stat.stat.isdir
