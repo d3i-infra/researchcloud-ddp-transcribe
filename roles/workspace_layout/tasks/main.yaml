@@ -19,6 +19,25 @@
     - inbox        # input: DDP JSONs, read once at ingest
     - transcripts  # durable sink: sync-to-storage.sh rsyncs here
     - archive
+  when: storage_backend != 'yoda'   # Yoda has no mount; collections live in iRODS
+
+- name: Create boot-disk inbox for the yoda backend (pulled from the collection)
+  ansible.builtin.file:
+    path: "{{ work_dir }}/inbox"
+    state: directory
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
+    mode: "0755"
+  when: storage_backend == 'yoda'
+
+- name: Install shared yoda-sync.sh (used by the generated sync/restore scripts)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/scripts/yoda-sync.sh"
+    dest: "{{ pipeline_home }}/yoda-sync.sh"
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
+    mode: "0755"
+  when: storage_backend == 'yoda'
 
 - name: Create boot-disk transcripts work dir (hot path, off the mount)
   ansible.builtin.file:

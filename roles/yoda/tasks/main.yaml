@@ -1,0 +1,58 @@
+---
+# Configure a Yoda (iRODS) durable backend reached via GoCommands (gocmd).
+# Runs only when storage_backend == 'yoda' (guarded at the play level). Installs
+# the gocmd static binary, writes pipeline_user's iRODS environment, caches an
+# auth token from the data-access password, and verifies the collection is
+# reachable — so blocked iRODS ports (1247/1248/20000-20199 to {{ yoda_host }})
+# or a bad password fail provisioning HERE, not mid-batch. Per ADR 0032 Yoda is
+# the seed/sink side only; nothing in this role touches the hot path.
+
+- name: Install gocmd (GoCommands static binary)
+  ansible.builtin.unarchive:
+    src: "{{ gocmd_url }}"
+    dest: /usr/local/bin
+    remote_src: true
+    mode: "0755"
+    owner: root
+    group: root
+    creates: /usr/local/bin/gocmd
+  # VERIFY on a real workspace: the release asset name/arch (amd64 vs x86_64)
+  # and that the tarball extracts `gocmd` at the top level. If it nests under a
+  # versioned dir, add `extra_opts: [--strip-components=1]`.
+
+- name: Ensure ~/.irods exists for pipeline_user
+  become_user: "{{ pipeline_user }}"
+  ansible.builtin.file:
+    path: "{{ pipeline_home }}/.irods"
+    state: directory
+    mode: "0700"
+
+- name: Write iRODS environment for pipeline_user
+  become_user: "{{ pipeline_user }}"
+  ansible.builtin.template:
+    src: irods_environment.json.j2
+    dest: "{{ pipeline_home }}/.irods/irods_environment.json"
+    mode: "0600"
+
+- name: Cache Yoda auth token from the data-access password
+  become_user: "{{ pipeline_user }}"
+  ansible.builtin.command: gocmd init
+  args:
+    # Feed the data-access password on stdin (iinit-style). Host/zone/user come
+    # from irods_environment.json, so only the password is needed here.
+    stdin: "{{ yoda_data_access_password }}"
+    creates: "{{ pipeline_home }}/.irods/.irodsA"
+  no_log: true
+  # VERIFY gocmd's non-interactive auth against {{ gocmd_version }}: some builds
+  # read the env var IRODS_USER_PASSWORD or take `-p` instead of stdin. The
+  # `creates` sentinel makes this idempotent — but an EXPIRED PAM token will NOT
+  # refresh on re-run (see docs/FOLLOWUPS.md: token TTL vs multi-day batches).
+
+- name: Verify the Yoda collection is reachable
+  become_user: "{{ pipeline_user }}"
+  ansible.builtin.command: "gocmd ls {{ yoda_collection }}"
+  register: yoda_ls
+  changed_when: false
+  failed_when: yoda_ls.rc != 0
+  # A non-zero rc here almost always means blocked iRODS ports or a bad/expired
+  # data-access password; provisioning fails now with the command's stderr.

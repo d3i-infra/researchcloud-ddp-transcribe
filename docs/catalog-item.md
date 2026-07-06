@@ -67,8 +67,14 @@ for the interactive ones); suggested text in the last column.
 
 | Parameter | Source type | Default value | Overwritable | Description |
 |---|---|---|---|---|
-| `storage_path` | Fixed | *(blank — required)* | ✓ | Mount point of the attached storage volume (e.g. `/home/<user>/data/<volume>`); holds inbox, transcripts, models, archive. |
+| `storage_path` | Fixed | *(blank — required for mount backends)* | ✓ | Mount point of the attached storage volume (e.g. `/home/<user>/data/<volume>`); holds inbox, transcripts, archive. Required for `src-volume`; unused for `yoda`. |
 | `pipeline_user` | Fixed | *(blank — required)* | ✓ | Workspace account that owns the source tree, run scripts, and state DB (your SRC username, e.g. `dmccool`). |
+| `storage_backend` | Fixed | `src-volume` | ✓ | Durable-storage backend: `src-volume` (attached/Research Drive mount, rsync), `yoda` (iRODS collection via GoCommands), `research-drive` (reserved). |
+| `yoda_collection` | Fixed | *(blank)* | ✓ | **yoda only.** iRODS collection base path, e.g. `/nluu10p/home/research-foo`; holds inbox, transcripts, state snapshot. |
+| `yoda_user` | Fixed | *(blank)* | ✓ | **yoda only.** Yoda username, e.g. `exampleuser@uu.nl`. |
+| `yoda_host` | Fixed | `fsw.data.uu.nl` | ✓ | **yoda only.** iRODS host (UU default). |
+| `yoda_zone` | Fixed | `nluu10p` | ✓ | **yoda only.** iRODS zone (UU default). |
+| `yoda_data_access_password` | **Co-Secret** | *(secret)* | ✓ | **yoda only.** Yoda data-access password (created in the Yoda web portal → Data Transfer). Stored on the CO Secrets tab, resolved at provision. |
 | `model_large_v3_turbo` | Fixed | `true` | ✓ | Download the large-v3-turbo whisper model (~573 MB; recommended production model). |
 | `model_tiny_en` | Fixed | `false` | ✓ | Download the tiny.en whisper model (~75 MB; fast, English-only; for smoke tests). |
 | `model_small` | Fixed | `false` | ✓ | Download the small whisper model (~466 MB; multilingual fallback). |
@@ -78,21 +84,32 @@ for the interactive ones); suggested text in the last column.
 | `run_smoke_test` | Fixed | `false` | ✓ | Run an init+ingest against a bundled fixture during provisioning (verification only). |
 | `force_cpu_build` | Fixed | `false` | ✓ | Build without CUDA even on a GPU flavor (debug aid; also bypasses the GPU-without-driver hard-fail). |
 
-`storage_path`/`pipeline_user` "required-ness" is enforced by making them
-interactive at the catalog item **and** the playbook's preflight `assert`
-backstop. The model flags' `true`/`false` values render as checkboxes once made
-interactive (the playbook coerces with `| bool`). Other source types are unused:
-`Co-Secret` (we have no secrets), `Resource`, and `Workspace` — note `Workspace`
-exposes only `co_id` / `co_name` / `co_irods`, **no per-user name**, so it
-*cannot* supply `pipeline_user` (a CO workspace has many users; the owning
-account must be chosen explicitly). `pipeline_user` stays Fixed + interactive,
-matching the d3i "Next" item's interactive-username pattern. Do *not* declare
-`co_passwordless_sudo` / `timeout` /
-`remote_ansible_version` here — those belong to SRC-CO and SRC-External plugin
-and surface at the catalog item Parameters step on their own. Internals
-(`pipeline_git_repo`, `cuda_*`) stay as playbook vars, undeclared. No Component
-Secrets — the pipeline repo and all downloads (NVIDIA, HuggingFace, crates.io)
-are public/anonymous.
+`pipeline_user` "required-ness" is enforced by making it interactive at the
+catalog item **and** the playbook's preflight `assert` backstop. `storage_path`
+is required only for the mount backends (`src-volume` / `research-drive`); the
+`yoda_*` params are required only for `storage_backend: yoda` — preflight asserts
+the right set per backend. The model flags' `true`/`false` values render as
+checkboxes once made interactive (the playbook coerces with `| bool`).
+
+**Yoda uses the component's first `Co-Secret`.** `yoda_data_access_password` is
+declared with Source type **`Co-Secret`**: create the secret on the owning CO's
+Secrets tab, and SRC resolves it into the `yoda_data_access_password` extra-var
+at provision. The `yoda` role feeds it to `gocmd init` (`no_log: true`) and never
+writes it to disk in cleartext. Quirk to watch: a literal `$` in a secret can be
+eaten by shell/compose interpolation — if the password contains `$`, verify it
+survives to `gocmd` (escape as `$$` if it reaches a compose-style layer).
+
+`Resource` and `Workspace` remain unused — note `Workspace` exposes only
+`co_id` / `co_name` / `co_irods`, **no per-user name**, so it *cannot* supply
+`pipeline_user` (a CO workspace has many users; the owning account must be chosen
+explicitly). `pipeline_user` stays Fixed + interactive, matching the d3i "Next"
+item's interactive-username pattern. Do *not* declare `co_passwordless_sudo` /
+`timeout` / `remote_ansible_version` here — those belong to SRC-CO and
+SRC-External plugin and surface at the catalog item Parameters step on their own.
+Internals (`pipeline_git_repo`, `cuda_*`, `gocmd_*`) stay as playbook vars,
+undeclared. No Component Secrets — the pipeline repo and all downloads (NVIDIA,
+HuggingFace, crates.io, GoCommands) are public/anonymous; the only secret is the
+`Co-Secret` above.
 
 > If you already created the component without parameters: **edit** it (don't
 > recreate). Editing overwrites the development version; the catalog item, which

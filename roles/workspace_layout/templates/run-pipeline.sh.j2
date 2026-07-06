@@ -7,7 +7,12 @@
 #   {{ '~/run-pipeline-gpu' ~ instance_id ~ '.sh' if cuda_build | bool else '~/run-pipeline.sh' }} ingest
 #   {{ '~/run-pipeline-gpu' ~ instance_id ~ '.sh' if cuda_build | bool else '~/run-pipeline.sh' }} process [--max-videos N]
 #
+{% if storage_backend == 'yoda' %}
+# Inbox is pulled from the Yoda collection to {{ work_dir }}/inbox by
+# ~/restore-from-storage.sh (no mount to read in place) — run it before ingest.
+{% else %}
 # Drop DDP watch-history JSONs into {{ storage_path }}/inbox before ingest.
+{% endif %}
 # `process` exits 3 when zero videos were claimed (done/empty) — not an error.
 # Transcripts are written to the boot disk ({{ work_dir }}/transcripts) for
 # speed + durability (ADR 0032); run ~/sync-to-storage.sh at batch boundaries
@@ -29,7 +34,11 @@ subcommand="${1:-}"
 rc=0
 /usr/local/bin/ddp-transcribe \
   --state-db "{{ state_dir }}/state.sqlite" \
+{% if storage_backend == 'yoda' %}
+  --inbox "{{ work_dir }}/inbox" \
+{% else %}
   --inbox "{{ storage_path }}/inbox" \
+{% endif %}
   --transcripts "{{ work_dir }}/transcripts" \
   --whisper-model "{{ work_dir }}/models/{{ default_model }}" \
   --download-workers {{ download_workers }} \

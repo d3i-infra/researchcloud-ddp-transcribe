@@ -6,10 +6,25 @@
 # binary built from a pinned ref, selected whisper models, and the
 # operator-driven run layout (per-GPU helper scripts; no systemd).
 #
+# Storage backend (per ADR 0032 the volume is seed-at-provision + sink-at-
+# downtime; this selects HOW that durable side is reached):
+#   src-volume      (default) an SRC-attached block volume mounted at
+#                   storage_path; seed/sink via rsync. Also serves a mounted
+#                   SURF Research Drive unchanged (just a different mount point).
+#   yoda            a Yoda (iRODS) collection reached via GoCommands (gocmd);
+#                   seed/sink via checksummed push/pull, no mount. Requires the
+#                   yoda_* parameters + a data-access password (Co-Secret).
+#   research-drive  reserved; currently treated as a mount backend and
+#                   hard-fails with guidance until the WebDAV mount is wired.
+#
 # Required parameters (no defaults — provisioning fails fast without them):
-#   storage_path    mount point of the attached storage volume,
-#                   e.g. /home/<user>/data/<volume>
 #   pipeline_user   workspace user that owns the run scripts and state dir
+#   storage_path    mount point of the attached storage volume, e.g.
+#                   /home/<user>/data/<volume> — required for mount backends
+#                   (src-volume / research-drive); unused for yoda.
+#   yoda_collection iRODS collection base path (e.g. /nluu10p/home/research-foo)
+#   yoda_user       Yoda username (e.g. exampleuser@uu.nl) — yoda backend only
+#   yoda_data_access_password  Yoda data-access password (Co-Secret) — yoda only
 #
 # All other parameters carry defaults below; SRC parameter values arrive
 # as extra-vars and take precedence. Booleans may arrive as strings —
@@ -22,6 +37,24 @@
   vars:
     pipeline_git_repo: "https://github.com/daniellemccool/ddp-transcribe"
     pipeline_git_ref: "v0.2.0-rc1"
+    # Durable-storage backend: src-volume (default) | yoda | research-drive.
+    storage_backend: "src-volume"
+    # Yoda (iRODS) connection — consumed only when storage_backend == 'yoda'.
+    # Defaults match Utrecht University's Yoda research environment; override
+    # yoda_collection / yoda_user at the catalog item. The data-access password
+    # arrives as a Co-Secret extra-var (yoda_data_access_password) — no default.
+    yoda_host: "fsw.data.uu.nl"
+    yoda_port: 1247
+    yoda_zone: "nluu10p"
+    yoda_home: "/nluu10p/home"
+    yoda_collection: ""
+    yoda_user: ""
+    # GoCommands release to install (static binary; no apt/admin). Pinned like
+    # the CUDA toolkit — bump only against a verified gocmd/iRODS-4.3.4 combo.
+    # VERIFY the tag exists at github.com/cyverse/gocommands/releases.
+    gocmd_version: "v0.10.6"
+    gocmd_release_base: "https://github.com/cyverse/gocommands/releases/download"
+    gocmd_url: "{{ gocmd_release_base }}/{{ gocmd_version }}/gocmd-{{ gocmd_version }}-linux-amd64.tar.gz"
     download_workers: 3
     compute_lang_probs: false
     run_smoke_test: false
@@ -29,8 +62,8 @@
     model_large_v3_turbo: true
     model_tiny_en: false
     model_small: false
-    # CUDA pins: the bake-verified toolkit (ddp-transcribe
-    # docs/SRC-BAKE-NOTES.md). Do not float to "latest".
+    # CUDA pins: the bake-verified toolkit (validated against the operator's
+    # private bake record). Do not float to "latest".
     cuda_repo_base: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64"
     cuda_keyring_url: "{{ cuda_repo_base }}/cuda-keyring_1.1-1_all.deb"
     cuda_toolkit_package: "cuda-toolkit-13-2"
@@ -42,5 +75,7 @@
     - role: ytdlp
     - role: pipeline_build
     - role: models
+    - role: yoda
+      when: storage_backend == 'yoda'
     - role: workspace_layout
     - role: verify
