@@ -70,7 +70,7 @@ for the interactive ones); suggested text in the last column.
 | `storage_path` | Fixed | *(blank — required for mount backends)* | ✓ | Mount point of the attached storage volume (e.g. `/home/<user>/data/<volume>`); holds inbox, transcripts, archive. Required for `src-volume`; unused for `yoda`. |
 | `pipeline_user` | Fixed | *(blank — required)* | ✓ | Workspace account that owns the source tree, run scripts, and state DB (your SRC username, e.g. `dmccool`). |
 | `storage_backend` | Fixed | `src-volume` | ✓ | Durable-storage backend: `src-volume` (attached/Research Drive mount, rsync), `yoda` (iRODS collection via GoCommands), `research-drive` (reserved). |
-| `yoda_collection` | Fixed | *(blank)* | ✓ | **yoda only.** iRODS collection base path, e.g. `/nluu10p/home/research-foo`; holds inbox, transcripts, state snapshot. |
+| `yoda_collection` | Fixed | *(blank)* | ✓ | **yoda only.** iRODS collection base path, e.g. `/nluu10p/home/research-foo`; holds inbox, the transcript shard archives (`transcripts-tars/`) plus their server-side-extracted per-file tree (`transcripts/`), and the state snapshot. |
 | `yoda_user` | Fixed | *(blank)* | ✓ | **yoda only.** Yoda username, e.g. `exampleuser@uu.nl`. |
 | `yoda_host` | Fixed | `fsw.data.uu.nl` | ✓ | **yoda only.** iRODS host (UU default). |
 | `yoda_zone` | Fixed | `nluu10p` | ✓ | **yoda only.** iRODS zone (UU default). |

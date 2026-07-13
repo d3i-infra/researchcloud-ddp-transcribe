@@ -50,25 +50,25 @@ repo's `docs/FOLLOWUPS.md`.)
   always does in production. If a future flow targets a fresh sub-collection,
   `gocmd mkdir` it first.
 
-- **1M-file scale: bulk_upload is DEAD on Yoda — a delivery redesign is needed.**
-  Disproven 2026-07-06: `--bulk_upload` (exposed as `YODA_BULK=1`) fails on
-  Yoda — its `.gocmd_staging` collection is rejected by gocommands' staging
-  safety check on research group collections, and `nluu10p` users have no
-  personal home collection to redirect `--irods_temp` to. Remove or rewrite
-  the `YODA_BULK` option. Measured file-per-file throughput is ~1.5 files/s at
-  15 threads (server per-op latency ~3 s; collection create ~3 s), so the
-  campaign (~2M files) is infeasible as a plain sync (~weeks). Options:
-  (a) tar-mode in `yoda-sync.sh` (per-shard/per-batch archives; changes restore
-  semantics); (b) FSW admin-side bulk ingest (server-side extraction of an
-  uploaded archive) — question pending with FSW tech support. Pilot scale
-  (≤~10k files) is tolerable as-is. See `yoda-operations.md`.
+- **RESOLVED 2026-07-13 — 1M-file scale: shard-tar delivery + server-side
+  extraction shipped.** `yoda-sync.sh push-transcripts` builds
+  byte-reproducible plain per-shard archives
+  (`transcripts-tars/shard-NN.tar`), syncs them (unchanged shards
+  checksum-skipped), and extracts changed shards server-side
+  (`gocmd bun -x -f -D tar`, ~13–14 files/s, ~9× the client-side per-file
+  rate) into a browsable `transcripts/` tree. `YODA_EXTRACT=0` gives an
+  archive-only sink; `push-transcripts-plain` keeps per-file delivery for
+  small pilots; `YODA_BULK`/`--bulk_upload` is deleted. NOTE the 2026-07-06
+  "server-side extraction likely blocked by policy" hypothesis was WRONG —
+  that failure was `bput`'s client-side staging guardrail; the server's
+  native extraction works fine. Design:
+  `docs/superpowers/specs/2026-07-10-yoda-shard-tar-delivery-design.md`.
 
-- **`yoda-sync.sh` uploads hidden files/dirs.** `gocmd sync` copies dotfiles;
-  a `.work/` scratch tree inside `transcripts/` (ytdlp temp dirs, can hold
-  large media) went to Yoda in live testing before being caught. Exclude
-  hidden entries (check the installed gocmd for `--exclude_hidden_files`; else
-  stage via glob). Same pass: default `--thread_num` to ~10 — 30 threads
-  saturated the server and made the portal unusable for all users (2026-07-06).
+- **RESOLVED 2026-07-13 — hidden files no longer uploaded; threads capped.**
+  Shard-tar staging excludes hidden entries at tar time (the `.work/` leak),
+  and the push-side sync calls in `yoda-sync.sh` default to `--thread_num 10`
+  (override via `YODA_THREADS`; keep ≤15 — 30 saturated the server for all
+  users, 2026-07-06).
 
 - **DAP lifecycle guidance belongs in the catalog-item docs.** Data-access
   passwords appear permanently invalidated after failed-attempt bursts (fresh
@@ -86,3 +86,23 @@ repo's `docs/FOLLOWUPS.md`.)
   `ansible-compat` on Python 3.14 (needs core ≥ 2.20). `yamllint` and
   `ansible-playbook --syntax-check` still run. Rebuild the venv with Python
   ≤ 3.12 for the full Tier-1 lint, or run lint in the Tier-2 container.
+
+- **RESOLVED 2026-07-13 — researcher hand-off via anonymous read tickets is
+  verified.** The iRODS `anonymous` user is enabled on fsw.data.uu.nl;
+  `gocmd mkticket -t read` + a 12-line credential-free config + a gocmd
+  binary gives a researcher `ls`/`get` on a collection with no UU account,
+  no DAP, no CO membership (three-way control test; denial presents as
+  "not found"). HYGIENE: default tickets have unlimited uses and NO expiry —
+  set one via `modticket` on any real hand-off; `rmticket` revokes;
+  `lsticket` audits. See `yoda-operations.md`.
+
+- **Does `bun -x -f` re-extraction mint a Yoda revision per overwritten
+  object?** Invisible to gocmd; storage-relevant at scale (every milestone
+  rewrites every file in changed shards). Asked of FSW (pending thread). If
+  costly, flip the `YODA_EXTRACT` default to 0 — one env var, no structural
+  change.
+
+- **Does the server finish or abandon a `bun -x` extraction if the client
+  disconnects at `--timeout`?** Untested (deliberately — server-load
+  politeness). Also for the FSW thread. Until known, size
+  `YODA_BUN_TIMEOUT` generously (default 1200 s covers ~10k-file shards).

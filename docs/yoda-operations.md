@@ -1,9 +1,10 @@
 # Yoda (nluu10p) — empirical operations notes
 
-Everything below was established by live testing on 2026-07-06 against
-`fsw.data.uu.nl` / zone `nluu10p` (Yoda, iRODS 4.3.x) with GoCommands v0.12.2,
-from both a home connection and a SURF Research Cloud workspace. It is the
-evidence base behind the `yoda` role's current shape and the open follow-ups.
+Everything below was established by live testing on 2026-07-06 and 2026-07-13
+against `fsw.data.uu.nl` / zone `nluu10p` (Yoda, iRODS 4.3.x) with GoCommands
+v0.12.2, from both a home connection and a SURF Research Cloud workspace. It
+is the evidence base behind the `yoda` role's current shape and the open
+follow-ups.
 Companion to `storage-backends.md` (the design rationale); this page is what
 the server actually does.
 
@@ -55,7 +56,7 @@ repeatedly:
   "Authentication failed" after a ~2 s PAM delay — the two failure shapes are
   distinguishable with `gocmd -d`.
 
-## Performance envelope — measured 2026-07-06
+## Performance envelope — measured 2026-07-06 and 2026-07-13
 
 Treat these as the **normal baseline**, not an incident (confirmed by the
 operator: minute-plus portal loads are typical for this instance).
@@ -67,19 +68,26 @@ operator: minute-plus portal loads are typical for this instance).
 | Small-file transfer, `gocmd sync --thread_num 15` | **~1.5 files/s** (631 files ≈ 7 min) |
 | Large single file (`gocmd put`, parallel streams) | bandwidth-bound; round trip verified from SRC |
 | 30 transfer threads | **saturates the server** — portal became unusable for all users; no server-side throttle observed |
+| Server-side tar extraction (`gocmd bun -x`) | **~13–14 files/s**, steady 300 → 2,000 files (23.6 s / 2 m 22 s); `-f` re-extract of an unchanged/1-changed 300-file shard ~5.6–5.8 s |
+| Large single object (`gocmd put`, 1 GB) | 12.0 s ≈ 85 MB/s, bandwidth-bound at default threads |
 
 Consequences:
 
-- **File-per-file transfer does not scale.** 130k files ≈ 24 h; the 1M-video
-  campaign (~2M files, see ADR 0004 sharding) ≈ **2+ weeks of continuous
-  transfer**. The transcript sink needs a different shape (see follow-ups:
-  tar-mode / admin bulk-ingest).
-- **`--bulk_upload` does NOT work on Yoda.** It stages tarballs in a
-  `.gocmd_staging` collection for server-side extraction; the staging-path
-  safety check rejects research group collections, and users have no personal
-  home collection on `nluu10p` to point `--irods_temp` at. (Even if staged,
-  server-side extraction likely needs rules Yoda's policy layer blocks.)
-  `storage-backends.md`'s original scale plan relied on this; it is corrected.
+- **File-per-file transfer does not scale.** 130k files ≈ 24 h at the raw
+  rate (a live ~100k sync indeed did not complete in 24 h — same baseline
+  plus sync-restart re-listing and collection-create overhead as the remote
+  tree grows); the 1M-video campaign (~2M files, ADR 0004 sharding) ≈
+  **2+ weeks of continuous transfer**. SOLVED 2026-07-13 by shard-tar
+  delivery + server-side extraction (see Transfer recipes and the bun -x
+  section below).
+- **`--bulk_upload` does NOT work on Yoda — but its failure is CLIENT-side.**
+  It stages tarballs in a `.gocmd_staging` collection for server-side
+  extraction; gocommands' staging-path safety check rejects research group
+  collections, and `nluu10p` users have no personal home collection to
+  point `--irods_temp` at. The 2026-07-06 guess that the server's policy
+  layer would also block extraction was WRONG — `gocmd bun -x` works (see
+  the 2026-07-13 section below). `storage-backends.md`'s original scale
+  plan relied on bulk_upload; it is corrected.
 - **Client restraint is the only load protection.** Keep `--thread_num` ≤ 15;
   ~10 is a good default. Watch for transfer errors and back off.
 - **Sync restarts get expensive as the remote tree grows** — the diff walk
@@ -95,19 +103,70 @@ Consequences:
   the target name (instant, no disk):
   `cp -al transcripts isabelle-transcripts && gocmd sync isabelle-transcripts i:<parent>`.
 - **Hidden files/dirs are synced too.** A `.work/` scratch tree inside the
-  transcripts dir went to Yoda before being caught. Stage with a glob
-  (`cp -al src/* staged/` skips dotfiles) until `yoda-sync.sh` excludes hidden
-  entries itself (follow-up filed).
+  transcripts dir went to Yoda before being caught. Resolved 2026-07-13 for
+  the default shard-tar path (`--exclude='.*'` at tar time); the plain
+  per-file path (`push-transcripts-plain`) still syncs dotfiles — stage with
+  a glob there if that matters.
 - **`cp` is iRODS→iRODS.** Local↔remote is `put`/`get` (with `i:` prefixes on
   the iRODS side, matching `yoda-sync.sh`). `sync` is checksummed and
   idempotent — safe to interrupt and re-run.
-- **Tarball pattern** for many small files when the recipient can accept an
-  archive: `tar czf`, single `gocmd put`, recipient extracts locally after
-  portal download. Minutes instead of hours; loses per-file portal
-  browsability.
+- **Shard-tar delivery (the default).** `yoda-sync.sh push-transcripts`
+  builds one byte-reproducible PLAIN archive per shard —
+  `tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0
+  --format=gnu --exclude='.*' -C <transcripts> NN` (no compression: `-D tar`
+  is the verified server-side extraction format and transfer is
+  bandwidth-bound anyway) — into a staging dir whose basename MUST be
+  `transcripts-tars` (basename-append rule), then one
+  `gocmd sync --thread_num 10`, then `gocmd bun -x -f -D tar
+  --timeout 1200` per *changed* shard into `<collection>/transcripts`
+  (changed set via a local md5 manifest). Unchanged shards are byte-
+  identical, so the sync checksum-skips them and no extraction fires.
+  Restore: `pull-resume` fetches the TARS and extracts locally — never the
+  per-file projection. Legacy plain `transcripts/` collections still
+  restore via the old sync path.
 - The SRC↔Yoda network path is fully verified: control port 1247 and the
   20000–20199 data range both pass SURF's egress (put/get round trip,
   2026-07-06).
+
+## Server-side extraction (`gocmd bun -x`) — verified 2026-07-13
+
+The 2026-07-06 hypothesis that server-side extraction is policy-blocked was
+wrong: what failed was `bput`'s client-side staging guardrail. The server's
+native extraction works on stock gocmd:
+
+```
+gocmd put shard.tar i:<collection>/transcripts-tars/   # one network op
+gocmd bun -x -f -D tar --timeout 1200 \
+  i:<collection>/transcripts-tars/shard-NN.tar i:<collection>/transcripts
+```
+
+- Measured: put 310 KB/300-file tar 5.1 s; extract 300 files 23.6 s, 2,000
+  files 2 m 22 s (**steady ~13–14 files/s**, no amortization — per-file
+  policy cost moved server-side, client `user` time ~0.04 s); `-f`
+  re-extract of a mostly-unchanged 300-file shard ~5.6–5.8 s.
+- **`-f` is required for re-delivery**: bare re-extract fails fast with
+  `SYS_COPY_ALREADY_IN_RESC` (-46000). Updated content propagates; new
+  files materialize.
+- **Raise `--timeout`**: gocmd's default 300 s is too short for a
+  ~10k-file campaign shard (~12 min at ~14 files/s); `yoda-sync.sh` uses
+  1200 s (`YODA_BUN_TIMEOUT`).
+- Campaign arithmetic: ~2M files ≈ ~40 h total server-side extraction,
+  amortized per changed shard across milestones (vs 2+ weeks client-side).
+- Open questions (FSW thread): revision-store cost of `-f` overwrites;
+  server behavior on client timeout mid-extraction.
+
+## Researcher hand-off via anonymous read tickets — verified 2026-07-13
+
+gocmd v0.12.2 has full ticket support (`mkticket`/`lsticket`/`modticket`/
+`rmticket`, `-T` on `ls`/`get`), and the iRODS `anonymous` user is enabled
+on fsw.data.uu.nl. Three-way control verified: anonymous env (12-line
+credential-free config, `irods_authentication_scheme: native`) + no ticket
+→ "not found" (existence not leaked); + read ticket → full `ls` and
+byte-correct `get`. Flow: mint a read ticket on the collection, hand over
+ticket string + anon config + a gocmd binary — no UU account, no DAP, no
+CO membership. HYGIENE: defaults are permissive (`USES LIMIT 0`,
+`EXPIRY TIME none`) — always `modticket` an expiry on real hand-offs;
+`rmticket` revokes; `lsticket` audits.
 
 ## Server version context
 
@@ -148,3 +207,8 @@ known issues directly relevant to what we measured:
 3. Do NOT verify auth by looking for `.irodsA` (see above). `gocmd ls` exit
    code is the truth.
 4. After any failure burst: stop, regenerate the DAP, single fresh attempt.
+5. iCommands are pre-installed on SURF's SRC Ubuntu image — an independent
+   client for cross-checking gocmd behavior (`ils -A` for ACLs, `iquest`
+   for metadata queries). Same DAP credential. Ticket hand-off is verified
+   via gocmd's `mkticket`/`lsticket`/`modticket`/`rmticket`; iCommands'
+   `iticket` should be equivalent but was not exercised.
