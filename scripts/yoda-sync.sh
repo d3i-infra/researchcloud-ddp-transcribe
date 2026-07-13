@@ -32,6 +32,44 @@ set -euo pipefail
 # gocmd version (older builds used bare paths for some subcommands).
 irods() { printf 'i:%s' "$1"; }
 
+# Staging dir for shard tars. Its basename MUST be `transcripts-tars`:
+# `gocmd sync SRC DEST` lands SRC as DEST/basename(SRC) when DEST exists,
+# which is exactly how the tars end up at <collection>/transcripts-tars.
+tar_stage_dir() {
+  : "${YODA_TRANSCRIPTS_LOCAL:?set YODA_TRANSCRIPTS_LOCAL}"
+  local stage="${YODA_TAR_STAGE:-$(dirname "${YODA_TRANSCRIPTS_LOCAL}")/transcripts-tars}"
+  if [ "$(basename "${stage}")" != "transcripts-tars" ]; then
+    echo "[yoda-sync] YODA_TAR_STAGE must end in /transcripts-tars (gocmd sync lands DEST/basename(SRC))" >&2
+    exit 2
+  fi
+  printf '%s' "${stage}"
+}
+
+# Build one byte-REPRODUCIBLE plain shard-NN.tar per populated 2-digit shard
+# dir. Reproducible (--sort/--owner/--group/--numeric-owner/--mtime/--format)
+# so unchanged shards produce identical bytes and `gocmd sync`'s checksum
+# diff skips them — incremental delivery with zero sync-side bookkeeping.
+# Plain uncompressed tar: `-D tar` is the verified format for server-side
+# extraction (gocmd bun -x, see docs/yoda-operations.md), and upload is
+# bandwidth-bound (~85 MB/s measured) so compression buys nothing that
+# matters. Hidden entries are excluded (the .work/ leak, FOLLOWUPS).
+stage_transcripts() {
+  : "${YODA_TRANSCRIPTS_LOCAL:?set YODA_TRANSCRIPTS_LOCAL}"
+  local stage; stage="$(tar_stage_dir)"
+  rm -rf "${stage}"
+  mkdir -p "${stage}"
+  local built=0 shard name
+  for shard in "${YODA_TRANSCRIPTS_LOCAL}"/[0-9][0-9]/; do
+    [ -d "${shard}" ] || continue    # glob matched nothing
+    name="$(basename "${shard}")"
+    tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 \
+        --format=gnu --exclude='.*' \
+        -C "${YODA_TRANSCRIPTS_LOCAL}" -cf "${stage}/shard-${name}.tar" "${name}"
+    built=$((built + 1))
+  done
+  echo "[yoda-sync] staged ${built} shard tar(s) in ${stage}"
+}
+
 push_transcripts() {
   : "${YODA_TRANSCRIPTS_LOCAL:?set YODA_TRANSCRIPTS_LOCAL}"
   echo "[yoda-sync] push transcripts: ${YODA_TRANSCRIPTS_LOCAL} -> ${YODA_COLLECTION}/$(basename "${YODA_TRANSCRIPTS_LOCAL}")"
@@ -82,13 +120,14 @@ pull_resume() {
 
 cmd="${1:-}"
 case "${cmd}" in
+  stage-transcripts) stage_transcripts ;;
   push-transcripts) push_transcripts ;;
   push-state)       push_state ;;
   push)             push_transcripts; push_state ;;
   pull-inbox)       pull_inbox ;;
   pull-resume)      pull_resume ;;
   *)
-    echo "usage: yoda-sync.sh {push-transcripts|push-state|push|pull-inbox|pull-resume}" >&2
+    echo "usage: yoda-sync.sh {stage-transcripts|push-transcripts|push-state|push|pull-inbox|pull-resume}" >&2
     exit 2
     ;;
 esac
