@@ -84,6 +84,42 @@ stage_transcripts() {
   echo "[yoda-sync] staged ${built} shard tar(s) in ${stage}"
 }
 
+# Pull <collection>/transcripts-tars into the staging dir and extract into
+# the transcripts tree. The tars are the durable record and the ONLY sane
+# restore path — pulling the extracted per-file projection would be the
+# ~1.5 files/s per-op wall all over again. Members are `NN/...` (tarred with
+# -C <transcripts> NN), so extraction is order-independent and lands in place.
+pull_transcript_tars() {
+  : "${YODA_TRANSCRIPTS_LOCAL:?set YODA_TRANSCRIPTS_LOCAL}"
+  local stage; stage="$(tar_stage_dir)"
+  rm -rf "${stage}"
+  mkdir -p "$(dirname "${stage}")"
+  echo "[yoda-sync] pull shard tars: ${YODA_COLLECTION}/transcripts-tars -> ${stage}"
+  # `gocmd get` of a collection lands it as <dest>/<collection-basename>,
+  # i.e. exactly ${stage} when dest is its parent.
+  gocmd get -f "$(irods "${YODA_COLLECTION}/transcripts-tars")" "$(dirname "${stage}")"
+  mkdir -p "${YODA_TRANSCRIPTS_LOCAL}"
+  local t n=0
+  for t in "${stage}"/shard-*.tar; do
+    [ -f "${t}" ] || continue
+    tar -xf "${t}" -C "${YODA_TRANSCRIPTS_LOCAL}"
+    n=$((n + 1))
+  done
+  if [ "${n}" -eq 0 ]; then
+    # Zero tars landed. Distinguish "collection is genuinely empty" (fresh
+    # batch — fine) from "gocmd get landed them somewhere else" (landing-rule
+    # mismatch — a restore that silently restores NOTHING must never look
+    # like success on a disaster-recovery path).
+    if gocmd ls "$(irods "${YODA_COLLECTION}/transcripts-tars")" | grep -q 'shard-.*\.tar'; then
+      echo "[yoda-sync] ERROR: remote transcripts-tars contains shard tars but none landed in ${stage} — gocmd get landing-rule mismatch; restore NOT performed" >&2
+      exit 1
+    fi
+    echo "[yoda-sync] remote transcripts-tars is empty — nothing to restore (fresh batch)"
+    return 0
+  fi
+  echo "[yoda-sync] extracted ${n} shard tar(s) into ${YODA_TRANSCRIPTS_LOCAL}"
+}
+
 push_transcripts() {
   local stage; stage="$(tar_stage_dir)"
   local manifest; manifest="$(dirname "${stage}")/.transcripts-tars-pushed.md5"
@@ -168,13 +204,17 @@ pull_resume() {
       || echo "[yoda-sync] no state snapshot in collection — fresh batch"
   fi
   if [ -n "${YODA_TRANSCRIPTS_LOCAL:-}" ]; then
-    # Same basename-append rule: sync INTO the parent so it lands as
-    # <parent>/transcripts == YODA_TRANSCRIPTS_LOCAL.
-    local parent; parent="$(dirname "${YODA_TRANSCRIPTS_LOCAL}")"
-    mkdir -p "${parent}"
-    echo "[yoda-sync] pull transcripts -> ${YODA_TRANSCRIPTS_LOCAL}"
-    gocmd sync "$(irods "${YODA_COLLECTION}/transcripts")" "${parent}" \
-      || echo "[yoda-sync] no transcripts in collection yet"
+    if gocmd ls "$(irods "${YODA_COLLECTION}/transcripts-tars")" >/dev/null 2>&1; then
+      pull_transcript_tars
+    else
+      # Legacy plain tree from pre-tar pilots. Same basename-append rule:
+      # sync INTO the parent so it lands as <parent>/transcripts.
+      local parent; parent="$(dirname "${YODA_TRANSCRIPTS_LOCAL}")"
+      mkdir -p "${parent}"
+      echo "[yoda-sync] pull transcripts (legacy plain) -> ${YODA_TRANSCRIPTS_LOCAL}"
+      gocmd sync "$(irods "${YODA_COLLECTION}/transcripts")" "${parent}" \
+        || echo "[yoda-sync] no transcripts in collection yet"
+    fi
   fi
 }
 

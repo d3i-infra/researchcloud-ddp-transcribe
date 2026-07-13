@@ -164,6 +164,47 @@ check "plain tree landed as transcripts/" '[ -f "${R}/transcripts/00/100.json" ]
 echo "— bulk upload removed"
 check "no bulk_upload/YODA_BULK left in yoda-sync.sh" '! grep -qi "bulk" "${SYNC}"'
 
+# ---- Task 3: pull-resume --------------------------------------------------------
+echo "— pull-resume (tar path)"
+fresh_workdir
+echo 'sqlite-bytes' > "${YODA_STATE_SNAPSHOT}"
+"${SYNC}" push
+EXPECTED_TREE="${TMP}/expected-tree"
+rm -rf "${EXPECTED_TREE}"; cp -r "${WORK}/transcripts" "${EXPECTED_TREE}"
+WORK2="${TMP}/work2-${RANDOM}"; mkdir -p "${WORK2}"
+export YODA_TRANSCRIPTS_LOCAL="${WORK2}/transcripts"
+export YODA_STATE_SNAPSHOT="${WORK2}/state.sqlite"
+"${SYNC}" pull-resume
+check "state snapshot restored"                     '[ -f "${WORK2}/state.sqlite" ]'
+check "restore pulled tars, not the projection"     'grep -q "^gocmd get .*transcripts-tars" "${FAKE_GOCMD_LOG}"'
+check "extracted tree matches source (sans hidden)" 'diff -r --exclude=".*" "${EXPECTED_TREE}" "${WORK2}/transcripts" >/dev/null'
+check "hidden entries were never restored"          '[ ! -e "${WORK2}/transcripts/17/.hidden" ] && [ ! -d "${WORK2}/transcripts/.work" ]'
+
+echo "— pull-resume (legacy plain fallback)"
+fresh_workdir
+mkdir -p "${R}/transcripts/42"
+echo 'legacy' > "${R}/transcripts/42/4242.txt"
+echo 'sqlite-bytes' > "${R}/state-snapshot.sqlite"
+WORK3="${TMP}/work3-${RANDOM}"; mkdir -p "${WORK3}"
+export YODA_TRANSCRIPTS_LOCAL="${WORK3}/transcripts"
+export YODA_STATE_SNAPSHOT="${WORK3}/state.sqlite"
+"${SYNC}" pull-resume
+check "legacy plain tree pulled"   '[ -f "${WORK3}/transcripts/42/4242.txt" ]'
+check "state snapshot restored"    '[ -f "${WORK3}/state.sqlite" ]'
+
+echo "— pull-resume (empty tars collection = fresh batch, not an error)"
+fresh_workdir
+mkdir -p "${R}/transcripts-tars"
+echo 'sqlite-bytes' > "${R}/state-snapshot.sqlite"
+WORK4="${TMP}/work4-${RANDOM}"; mkdir -p "${WORK4}"
+export YODA_TRANSCRIPTS_LOCAL="${WORK4}/transcripts"
+export YODA_STATE_SNAPSHOT="${WORK4}/state.sqlite"
+if "${SYNC}" pull-resume; then
+  ok "empty tars collection tolerated (exit 0)"
+else
+  bad "empty tars collection tolerated (exit 0)"
+fi
+
 # ---- summary ------------------------------------------------------------------
 echo
 echo "passed: ${PASS}  failed: ${FAIL}"
