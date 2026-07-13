@@ -113,8 +113,9 @@ repo auto-deletes remote data.
    shards (~12 min at ~14 files/s; gocmd default 300 s is too short).
 6. Rewrite the manifest only after sync + extraction succeed; a failed
    milestone re-syncs (checksum no-op) and re-extracts (`-f`, idempotent)
-   on the next run. Deleting the manifest forces re-extraction of
-   everything.
+   on the next run. A push with `YODA_EXTRACT=0` does NOT advance the
+   manifest, so a later extraction-enabled push still extracts those
+   shards. Deleting the manifest forces re-extraction of everything.
 
 Milestone cost: ~2 min local CPU to re-tar + bandwidth for changed shards +
 server-side extraction of changed shards only.

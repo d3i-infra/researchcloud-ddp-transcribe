@@ -300,6 +300,11 @@ YODA_EXTRACT=0 "${SYNC}" push-transcripts
 check "tars pushed"                               '[ -f "${R}/transcripts-tars/shard-00.tar" ]'
 check "no extraction happened"                    '[ ! -d "${R}/transcripts" ] && ! grep -q "^gocmd bun " "${FAKE_GOCMD_LOG}"'
 
+echo "— extraction deferred by YODA_EXTRACT=0 happens on the next default push"
+: > "${FAKE_GOCMD_LOG}"
+"${SYNC}" push-transcripts
+check "deferred shards extracted now"             '[ "$(grep -c "^gocmd bun " "${FAKE_GOCMD_LOG}")" -eq 2 ] && [ -f "${R}/transcripts/00/100.json" ]'
+
 echo "— push (tars + state)"
 fresh_workdir
 echo 'sqlite-bytes' > "${YODA_STATE_SNAPSHOT}"
@@ -362,10 +367,14 @@ push_transcripts() {
         "$(irods "${YODA_COLLECTION}/transcripts")"
     done
   fi
-  # Record delivered state only after sync + extraction succeed; a failed
-  # milestone re-syncs (checksum no-op) and re-extracts (-f) next run.
-  if compgen -G "${stage}/shard-*.tar" > /dev/null; then
-    ( cd "${stage}" && md5sum shard-*.tar > "${manifest}" )
+  # Record delivered state only after sync AND extraction succeed; a failed
+  # milestone re-syncs (checksum no-op) and re-extracts (-f) next run. A push
+  # with YODA_EXTRACT=0 deliberately does NOT advance the manifest — the next
+  # extraction-enabled push must still extract those shards. The redirect sits
+  # OUTSIDE the subshell so ${manifest} resolves against the caller's CWD even
+  # if the stage path is relative.
+  if [ "${YODA_EXTRACT:-1}" != "0" ] && compgen -G "${stage}/shard-*.tar" > /dev/null; then
+    ( cd "${stage}" && md5sum shard-*.tar ) > "${manifest}"
   fi
 }
 
