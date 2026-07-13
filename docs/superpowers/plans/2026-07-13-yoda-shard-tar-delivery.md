@@ -491,6 +491,19 @@ export YODA_STATE_SNAPSHOT="${WORK3}/state.sqlite"
 "${SYNC}" pull-resume
 check "legacy plain tree pulled"   '[ -f "${WORK3}/transcripts/42/4242.txt" ]'
 check "state snapshot restored"    '[ -f "${WORK3}/state.sqlite" ]'
+
+echo "— pull-resume (empty tars collection = fresh batch, not an error)"
+fresh_workdir
+mkdir -p "${R}/transcripts-tars"
+echo 'sqlite-bytes' > "${R}/state-snapshot.sqlite"
+WORK4="${TMP}/work4-${RANDOM}"; mkdir -p "${WORK4}"
+export YODA_TRANSCRIPTS_LOCAL="${WORK4}/transcripts"
+export YODA_STATE_SNAPSHOT="${WORK4}/state.sqlite"
+if "${SYNC}" pull-resume; then
+  ok "empty tars collection tolerated (exit 0)"
+else
+  bad "empty tars collection tolerated (exit 0)"
+fi
 ```
 
 - [ ] **Step 2: Run it to verify the new tests fail**
@@ -524,6 +537,18 @@ pull_transcript_tars() {
     tar -xf "${t}" -C "${YODA_TRANSCRIPTS_LOCAL}"
     n=$((n + 1))
   done
+  if [ "${n}" -eq 0 ]; then
+    # Zero tars landed. Distinguish "collection is genuinely empty" (fresh
+    # batch — fine) from "gocmd get landed them somewhere else" (landing-rule
+    # mismatch — a restore that silently restores NOTHING must never look
+    # like success on a disaster-recovery path).
+    if gocmd ls "$(irods "${YODA_COLLECTION}/transcripts-tars")" | grep -q 'shard-.*\.tar'; then
+      echo "[yoda-sync] ERROR: remote transcripts-tars contains shard tars but none landed in ${stage} — gocmd get landing-rule mismatch; restore NOT performed" >&2
+      exit 1
+    fi
+    echo "[yoda-sync] remote transcripts-tars is empty — nothing to restore (fresh batch)"
+    return 0
+  fi
   echo "[yoda-sync] extracted ${n} shard tar(s) into ${YODA_TRANSCRIPTS_LOCAL}"
 }
 ```
