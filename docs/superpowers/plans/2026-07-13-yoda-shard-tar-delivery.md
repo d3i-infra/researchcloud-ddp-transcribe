@@ -787,8 +787,61 @@ CO membership. HYGIENE: defaults are permissive (`USES LIMIT 0`,
 ```markdown
 5. iCommands are pre-installed on SURF's SRC Ubuntu image — an independent
    client for cross-checking gocmd behavior (`ils -A` for ACLs, `iquest`
-   for metadata queries, `iticket` for share tickets). Same DAP credential.
+   for metadata queries). Same DAP credential. Ticket hand-off is verified
+   via gocmd's `mkticket`/`lsticket`/`modticket`/`rmticket`; iCommands'
+   `iticket` should be equivalent but was not exercised.
 ```
+
+3f. **Reconcile the pre-existing 2026-07-06 text with the corrections** (the
+2026-07-13 findings must not coexist with the disproven claims above them):
+
+- Heading `## Performance envelope — measured 2026-07-06` →
+  `## Performance envelope — measured 2026-07-06 and 2026-07-13`.
+- Replace the Consequences bullet beginning `- **File-per-file transfer does
+  not scale.**` with:
+
+```markdown
+- **File-per-file transfer does not scale.** 130k files ≈ 24 h at the raw
+  rate (a live ~100k sync indeed did not complete in 24 h — same baseline
+  plus sync-restart re-listing and collection-create overhead as the remote
+  tree grows); the 1M-video campaign (~2M files, ADR 0004 sharding) ≈
+  **2+ weeks of continuous transfer**. SOLVED 2026-07-13 by shard-tar
+  delivery + server-side extraction (see Transfer recipes and the bun -x
+  section below).
+```
+
+- Replace the Consequences bullet beginning `- **\`--bulk_upload\` does NOT
+  work on Yoda.**` with:
+
+```markdown
+- **`--bulk_upload` does NOT work on Yoda — but its failure is CLIENT-side.**
+  It stages tarballs in a `.gocmd_staging` collection for server-side
+  extraction; gocommands' staging-path safety check rejects research group
+  collections, and `nluu10p` users have no personal home collection to
+  point `--irods_temp` at. The 2026-07-06 guess that the server's policy
+  layer would also block extraction was WRONG — `gocmd bun -x` works (see
+  the 2026-07-13 section below). `storage-backends.md`'s original scale
+  plan relied on bulk_upload; it is corrected.
+```
+
+- In `storage-backends.md`'s new Scale text, extend the sentence `A
+  100k-file sync did not complete in 24 h of continuous running.` to `A
+  100k-file sync did not complete in 24 h of continuous running (the
+  ~1.5 files/s baseline plus sync-restart re-listing overhead as the remote
+  tree grows).` so the figure bridges to yoda-operations.md's "130k ≈ 24 h".
+- In yoda-operations.md's Transfer recipes, in the hidden-files bullet,
+  replace the trailing clause `Stage with a glob (\`cp -al src/* staged/\`
+  skips dotfiles) until \`yoda-sync.sh\` excludes hidden entries itself
+  (follow-up filed).` with: `Resolved 2026-07-13 for the default shard-tar
+  path (\`--exclude='.*'\` at tar time); the plain per-file path
+  (\`push-transcripts-plain\`) still syncs dotfiles — stage with a glob
+  there if that matters.`
+- In FOLLOWUPS.md's hidden-files RESOLVED entry, narrow `transfer calls in
+  \`yoda-sync.sh\` default to \`--thread_num 10\`` to `the push-side sync
+  calls in \`yoda-sync.sh\` default to \`--thread_num 10\`` (pull-side
+  calls run at gocmd's own default).
+- Reflow the ragged paragraph wrapping in storage-backends.md's Scale
+  section left by the insertion (cosmetic).
 
 - [ ] **Step 4: `docs/catalog-item.md` — delivery note**
 
