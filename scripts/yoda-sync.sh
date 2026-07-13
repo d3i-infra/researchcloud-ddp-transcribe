@@ -12,18 +12,32 @@
 #   YODA_TRANSCRIPTS_LOCAL local transcripts dir (the sharded NN/ tree)
 #   YODA_INBOX_LOCAL       local inbox dir (DDP export JSONs)
 #   YODA_STATE_SNAPSHOT    local path to the state snapshot file
+#   YODA_TAR_STAGE         staging dir for shard tars (basename must be
+#                          `transcripts-tars`; default: sibling of the
+#                          transcripts dir)
+#   YODA_THREADS           gocmd transfer threads (default 10; keep <=15 —
+#                          30 saturated the server for all users)
+#   YODA_EXTRACT           set 0 to skip server-side extraction of changed
+#                          shards into <collection>/transcripts (default on)
+#   YODA_BUN_TIMEOUT       gocmd bun -x client timeout in seconds
+#                          (default 1200; gocmd's own default 300 is too
+#                          short for ~10k-file shards)
 #
 # Usage:
-#   yoda-sync.sh push-transcripts   # local transcripts -> collection/transcripts
-#   yoda-sync.sh push-state         # state snapshot     -> collection/state-snapshot.sqlite
-#   yoda-sync.sh push               # push-transcripts + push-state
-#   yoda-sync.sh pull-inbox         # collection/inbox   -> local inbox
-#   yoda-sync.sh pull-resume        # collection state + transcripts -> local (rebuild)
+#   yoda-sync.sh stage-transcripts       # build per-shard tars in staging dir
+#   yoda-sync.sh push-transcripts        # shard tars + server-side extraction (default delivery)
+#   yoda-sync.sh push-transcripts-plain  # per-file delivery (small pilots only)
+#   yoda-sync.sh push-state              # state snapshot -> collection/state-snapshot.sqlite
+#   yoda-sync.sh push                    # push-transcripts + push-state
+#   yoda-sync.sh pull-inbox              # collection/inbox -> local inbox
+#   yoda-sync.sh pull-resume             # collection state + transcripts -> local (rebuild)
 #
-# Transfers use `gocmd sync` (hash-checksummed, idempotent) — the integrity
-# guarantee WebDAV/Network-Disk cannot give. At ~1M transcripts the per-file
-# listing cost grows; per-shard tar bundling is the documented scale path
-# (docs/FOLLOWUPS.md) and is not needed for pilot-scale delivery.
+# Transcripts are delivered as byte-reproducible per-shard plain tars
+# (shard-NN.tar) plus server-side extraction (gocmd bun -x) into a browsable
+# per-file tree — at ~1.5 files/s of server-side per-op latency, client-side
+# per-file delivery cannot finish a campaign-scale sync
+# (docs/storage-backends.md). `push-transcripts-plain` keeps the per-file
+# path for small pilots.
 set -euo pipefail
 
 : "${YODA_COLLECTION:?set YODA_COLLECTION to the iRODS collection base path}"
@@ -71,14 +85,60 @@ stage_transcripts() {
 }
 
 push_transcripts() {
+  local stage; stage="$(tar_stage_dir)"
+  local manifest; manifest="$(dirname "${stage}")/.transcripts-tars-pushed.md5"
+  stage_transcripts
+  # Changed-shard set: md5 of each staged (reproducible) tar vs the manifest
+  # recorded by the last successful push. No manifest = everything changed.
+  # The sync itself needs no bookkeeping (checksum diff), but the extraction
+  # step must know WHICH shards to extract; deleting the manifest forces
+  # re-extraction of all shards (harmless: bun -x -f is idempotent).
+  local changed=() t name
+  for t in "${stage}"/shard-*.tar; do
+    [ -f "${t}" ] || continue
+    name="$(basename "${t}")"
+    if [ ! -f "${manifest}" ] \
+       || ! grep -qxF "$(md5sum "${t}" | cut -d' ' -f1)  ${name}" "${manifest}"; then
+      changed+=("${name}")
+    fi
+  done
+  echo "[yoda-sync] push shard tars: ${stage} -> ${YODA_COLLECTION}/transcripts-tars (${#changed[@]} changed)"
+  # Sync the staging dir at the collection base: gocmd's basename-append rule
+  # lands it as <collection>/transcripts-tars. Unchanged shards are byte-
+  # identical (reproducible tars) so the checksum diff skips them. Threads
+  # capped <=15: 30 saturated the server for all users (2026-07-06).
+  gocmd sync --thread_num "${YODA_THREADS:-10}" "${stage}" "$(irods "${YODA_COLLECTION}")"
+  if [ "${YODA_EXTRACT:-1}" != "0" ] && [ "${#changed[@]}" -gt 0 ]; then
+    # Server-side extraction into the browsable per-file projection
+    # (~13-14 files/s server-side, measured 2026-07-13). -f is required for
+    # re-delivery (bare re-extract fails SYS_COPY_ALREADY_IN_RESC); the
+    # raised --timeout covers ~10k-file shards (gocmd default 300s is too
+    # short).
+    for name in "${changed[@]}"; do
+      echo "[yoda-sync] server-side extract: ${name} -> ${YODA_COLLECTION}/transcripts"
+      gocmd bun -x -f -D tar --timeout "${YODA_BUN_TIMEOUT:-1200}" \
+        "$(irods "${YODA_COLLECTION}/transcripts-tars/${name}")" \
+        "$(irods "${YODA_COLLECTION}/transcripts")"
+    done
+  fi
+  # Record delivered state only after sync AND extraction succeed; a failed
+  # milestone re-syncs (checksum no-op) and re-extracts (-f) next run. A push
+  # with YODA_EXTRACT=0 deliberately does NOT advance the manifest — the next
+  # extraction-enabled push must still extract those shards. The redirect sits
+  # OUTSIDE the subshell so ${manifest} resolves against the caller's CWD even
+  # if the stage path is relative.
+  if [ "${YODA_EXTRACT:-1}" != "0" ] && compgen -G "${stage}/shard-*.tar" > /dev/null; then
+    ( cd "${stage}" && md5sum shard-*.tar ) > "${manifest}"
+  fi
+}
+
+# Per-file delivery for small pilots (<= ~10k files). At campaign scale this
+# is ~1.5 files/s — days — which is why tar delivery is the default
+# (docs/storage-backends.md).
+push_transcripts_plain() {
   : "${YODA_TRANSCRIPTS_LOCAL:?set YODA_TRANSCRIPTS_LOCAL}"
-  echo "[yoda-sync] push transcripts: ${YODA_TRANSCRIPTS_LOCAL} -> ${YODA_COLLECTION}/$(basename "${YODA_TRANSCRIPTS_LOCAL}")"
-  # `gocmd sync SRC DEST` creates DEST/basename(SRC) (it appends the source dir
-  # name and ignores a trailing slash), and creates the target itself — so
-  # target the collection base, not <base>/transcripts, or you get a doubled
-  # transcripts/transcripts path. Set YODA_BULK=1 to enable gocmd's native
-  # bundling (--bulk_upload) for the 1M-file campaign.
-  gocmd sync ${YODA_BULK:+--bulk_upload} "${YODA_TRANSCRIPTS_LOCAL}" "$(irods "${YODA_COLLECTION}")"
+  echo "[yoda-sync] push transcripts (plain per-file): ${YODA_TRANSCRIPTS_LOCAL} -> ${YODA_COLLECTION}/$(basename "${YODA_TRANSCRIPTS_LOCAL}")"
+  gocmd sync --thread_num "${YODA_THREADS:-10}" "${YODA_TRANSCRIPTS_LOCAL}" "$(irods "${YODA_COLLECTION}")"
 }
 
 push_state() {
@@ -120,14 +180,15 @@ pull_resume() {
 
 cmd="${1:-}"
 case "${cmd}" in
-  stage-transcripts) stage_transcripts ;;
-  push-transcripts) push_transcripts ;;
-  push-state)       push_state ;;
-  push)             push_transcripts; push_state ;;
-  pull-inbox)       pull_inbox ;;
-  pull-resume)      pull_resume ;;
+  stage-transcripts)       stage_transcripts ;;
+  push-transcripts)        push_transcripts ;;
+  push-transcripts-plain)  push_transcripts_plain ;;
+  push-state)              push_state ;;
+  push)                    push_transcripts; push_state ;;
+  pull-inbox)              pull_inbox ;;
+  pull-resume)             pull_resume ;;
   *)
-    echo "usage: yoda-sync.sh {stage-transcripts|push-transcripts|push-state|push|pull-inbox|pull-resume}" >&2
+    echo "usage: yoda-sync.sh {stage-transcripts|push-transcripts|push-transcripts-plain|push-state|push|pull-inbox|pull-resume}" >&2
     exit 2
     ;;
 esac

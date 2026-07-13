@@ -115,6 +115,55 @@ else
   ok "wrong YODA_TAR_STAGE basename rejected"
 fi
 
+# ---- Task 2: push -------------------------------------------------------------
+echo "— push-transcripts (tars + server-side extraction)"
+fresh_workdir
+"${SYNC}" push-transcripts
+check "shard tars landed under transcripts-tars/" '[ -f "${R}/transcripts-tars/shard-00.tar" ] && [ -f "${R}/transcripts-tars/shard-17.tar" ]'
+check "sync used --thread_num 10"                 'grep -q -- "--thread_num 10" "${FAKE_GOCMD_LOG}"'
+check "extraction produced per-file tree"         '[ -f "${R}/transcripts/00/100.json" ] && [ -f "${R}/transcripts/17/217.json" ]'
+check "one bun call per shard, right flags"       '[ "$(grep -c "^gocmd bun " "${FAKE_GOCMD_LOG}")" -eq 2 ] && grep -q -- "-x -f -D tar --timeout 1200" "${FAKE_GOCMD_LOG}"'
+check "manifest written"                          '[ -f "${WORK}/.transcripts-tars-pushed.md5" ]'
+
+echo "— idempotent second push extracts nothing"
+: > "${FAKE_GOCMD_LOG}"
+"${SYNC}" push-transcripts
+check "no bun calls when nothing changed"         '! grep -q "^gocmd bun " "${FAKE_GOCMD_LOG}"'
+
+echo "— single-shard change extracts exactly that shard"
+echo 'more' >> "${WORK}/transcripts/17/217.json"
+: > "${FAKE_GOCMD_LOG}"
+"${SYNC}" push-transcripts
+check "exactly one bun call"                      '[ "$(grep -c "^gocmd bun " "${FAKE_GOCMD_LOG}")" -eq 1 ]'
+check "it targeted shard-17"                      'grep "^gocmd bun " "${FAKE_GOCMD_LOG}" | grep -q "shard-17.tar"'
+check "updated content reached the projection"    'grep -q more "${R}/transcripts/17/217.json"'
+
+echo "— YODA_EXTRACT=0 skips extraction"
+fresh_workdir
+YODA_EXTRACT=0 "${SYNC}" push-transcripts
+check "tars pushed"                               '[ -f "${R}/transcripts-tars/shard-00.tar" ]'
+check "no extraction happened"                    '[ ! -d "${R}/transcripts" ] && ! grep -q "^gocmd bun " "${FAKE_GOCMD_LOG}"'
+
+echo "— extraction deferred by YODA_EXTRACT=0 happens on the next default push"
+: > "${FAKE_GOCMD_LOG}"
+"${SYNC}" push-transcripts
+check "deferred shards extracted now"             '[ "$(grep -c "^gocmd bun " "${FAKE_GOCMD_LOG}")" -eq 2 ] && [ -f "${R}/transcripts/00/100.json" ]'
+
+echo "— push (tars + state)"
+fresh_workdir
+echo 'sqlite-bytes' > "${YODA_STATE_SNAPSHOT}"
+"${SYNC}" push
+check "shard tars landed"      '[ -f "${R}/transcripts-tars/shard-00.tar" ]'
+check "state snapshot landed"  '[ -f "${R}/state-snapshot.sqlite" ]'
+
+echo "— push-transcripts-plain (escape hatch)"
+fresh_workdir
+"${SYNC}" push-transcripts-plain
+check "plain tree landed as transcripts/" '[ -f "${R}/transcripts/00/100.json" ]'
+
+echo "— bulk upload removed"
+check "no bulk_upload/YODA_BULK left in yoda-sync.sh" '! grep -qi "bulk" "${SYNC}"'
+
 # ---- summary ------------------------------------------------------------------
 echo
 echo "passed: ${PASS}  failed: ${FAIL}"
