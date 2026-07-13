@@ -53,7 +53,13 @@ uses **WebDAV** — appropriate there because mono writes one bundle per donatio
 Transcripts shard on the last two digits of the video id (ddp-transcribe
 ADR 0004) → ~100 shards, ~10k files/shard at 1M videos. `yoda-sync.sh` uses
 `gocmd sync` (checksummed, symmetric), which is right for pilot-scale delivery.
-For the full campaign, gocmd's **native** `--bulk_upload` (exposed as
-`YODA_BULK=1`) bundles many small files per transfer — no hand-rolled `tar`
-needed; tune `--max_bundle_size` / `--max_file_num` once real throughput is
-measured.
+
+**Corrected 2026-07-06 after live measurement** (details in
+`yoda-operations.md`): the original plan to use gocmd's native `--bulk_upload`
+for the full campaign **does not work on Yoda** — its server-side staging is
+rejected on research group collections and `nluu10p` users have no personal
+home collection to redirect it to. Measured file-per-file throughput is
+~1.5 files/s (server-side per-operation latency, not bandwidth), which puts a
+2M-file campaign at **weeks of transfer time**. The campaign-scale sink
+therefore needs either a tar-based delivery mode or an admin-side bulk-ingest
+path (question pending with FSW tech support); see `FOLLOWUPS.md`.

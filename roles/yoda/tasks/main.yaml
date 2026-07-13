@@ -33,33 +33,44 @@
     dest: "{{ pipeline_home }}/.irods/irods_environment.json"
     mode: "0600"
 
+- name: Check for an existing auth token file
+  ansible.builtin.stat:
+    path: "{{ pipeline_home }}/.irods/.irodsA"
+  register: yoda_irodsa
+  # Existence gates the probe ONLY — a missing file can't be a valid token, and
+  # probing without one makes gocmd submit an EMPTY password: a wasted
+  # server-side PAM failure that feeds Yoda's failed-attempt lockout tally.
+  # Validity is still judged by the probe's exit code below, never by this stat.
+
 - name: Probe for a working Yoda auth token
   become_user: "{{ pipeline_user }}"
-  ansible.builtin.command: "gocmd ls {{ yoda_collection }}"
+  ansible.builtin.command: "gocmd ls -c {{ pipeline_home }}/.irods {{ yoda_collection }}"
   register: yoda_token_probe
   changed_when: false
   failed_when: false
+  when: yoda_irodsa.stat.exists
   # gocmd's exit code is the source of truth for auth state — never test for
   # .irodsA on disk: the token lands wherever irods_authentication_file points,
   # and a file that exists can still hold an expired PAM token. Probing also
   # makes re-provisioning refresh an expired token instead of skipping init.
 
 - name: Cache Yoda auth token from the data-access password
-  when: yoda_token_probe.rc != 0
+  when: not yoda_irodsa.stat.exists or (yoda_token_probe.rc | default(1)) != 0
   block:
     - name: Run gocmd init (retried — Yoda PAM auth has transient outages)
       become_user: "{{ pipeline_user }}"
-      ansible.builtin.command: "gocmd init --ttl {{ yoda_auth_ttl_hours }}"
+      ansible.builtin.command: "gocmd init --ttl {{ yoda_auth_ttl_hours }} -c {{ pipeline_home }}/.irods"
       register: yoda_init
       until: yoda_init.rc == 0
       retries: 3
       delay: 60
       environment:
-        # gocmd reads the password from IRODS_USER_PASSWORD (confirmed: the binary
-        # embeds envconfig:"IRODS_USER_PASSWORD"); host/zone/user come from
-        # irods_environment.json. --ttl sets the PAM token lifetime in hours.
-        # VERIFY at Tier 3 that Yoda accepts the requested TTL (the server may
-        # cap it; iRODS defaults to a 336h maximum).
+        # -c is REQUIRED for headless init: without it gocmd runs its interactive
+        # questionnaire and reads the password from stdin (empty under Ansible)
+        # even when IRODS_USER_PASSWORD is set. With -c there are no prompts and
+        # the env-var password is used (verified against v0.12.2 both ways).
+        # host/zone/user come from irods_environment.json; --ttl sets the PAM
+        # token lifetime in hours (Yoda accepts 720; iRODS default cap is 336).
         IRODS_USER_PASSWORD: "{{ yoda_data_access_password }}"
       no_log: true
   rescue:
@@ -70,13 +81,17 @@
           several minutes. Yoda's PAM/token backend is known to have transient
           outages, so this may not be your fault: verify the data-access
           password is current (Yoda portal -> Data access passwords), then
-          re-run provisioning later. To see the underlying gocmd error (hidden
-          here because the task handles the password), run
-          'sudo -u {{ pipeline_user }} gocmd init' on this host.
+          re-run provisioning later. IMPORTANT - do not retry in a tight loop:
+          repeated failed logins appear to trigger a server-side per-user
+          lockout that every further attempt extends (observed 2026-07-06);
+          wait an hour with NO attempts before trying again. To see the
+          underlying gocmd error (hidden here because the task handles the
+          password), run 'sudo -u {{ pipeline_user }} gocmd init -c
+          {{ pipeline_home }}/.irods' on this host.
 
 - name: Verify the Yoda collection is reachable
   become_user: "{{ pipeline_user }}"
-  ansible.builtin.command: "gocmd ls {{ yoda_collection }}"
+  ansible.builtin.command: "gocmd ls -c {{ pipeline_home }}/.irods {{ yoda_collection }}"
   register: yoda_ls
   changed_when: false
   failed_when: yoda_ls.rc != 0

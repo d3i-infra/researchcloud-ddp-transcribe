@@ -34,23 +34,14 @@ repo's `docs/FOLLOWUPS.md`.)
 - **`scripts/tier2-docker.sh` "run 2 recap:" echo prints empty.** Cosmetic; the
   changed-count extraction still works. Fix when next touching the script.
 
-- **Yoda backend: two small runtime confirmations remain (most VERIFYs cleared).**
-  A live round-trip against UU Yoda (`fsw.data.uu.nl`, gocmd v0.12.2) confirmed:
-  the asset `gocmd-<ver>-linux-amd64.tar.gz` extracts a top-level `gocmd`; auth
-  works over `pam_password` with a data-access password; `gocmd ls`/`sync`/`put`
-  behave as the role/script assume; and the full `push`→`pull` round-trip is
-  byte-identical. Still to confirm at Tier 3 (needs the Co-Secret path, not just
-  a dev box): (1) the **env-var** auth (`IRODS_USER_PASSWORD`) completes
-  `gocmd init` **non-interactively** under Ansible (verified via the binary's
-  embedded `envconfig` tag + `--help`, not yet run headless), and (2) Yoda
-  accepts the requested `--ttl` (see next item).
-
-- **Yoda PAM token TTL — now a lever, verify the server cap.** `gocmd init --ttl
-  <hours>` sets the token lifetime; the role passes `yoda_auth_ttl_hours` (default
-  720). Confirm at Tier 3 that Yoda's server does not cap it lower (if it errors,
-  lower the value). The `creates: ~/.irods/.irodsA` sentinel means an expired
-  token won't refresh on a plain re-run — operator re-runs `gocmd init` if a batch
-  outlives the token.
+- **RESOLVED 2026-07-06 — Yoda runtime confirmations (see `yoda-operations.md`).**
+  Both remaining VERIFYs cleared by a live isolated-role run on the SRC
+  workspace: (1) `IRODS_USER_PASSWORD` completes `gocmd init` non-interactively
+  under Ansible — but **only with `-c`**; without it init interrogates stdin
+  and submits an empty password (this was a real defect, fixed in the role).
+  (2) Yoda accepts `--ttl 720`. The `creates:` sentinel is gone: the role now
+  probes token validity by `gocmd ls` exit code and re-inits on a stale token,
+  so an expired token refreshes on re-run.
 
 - **Yoda push requires the collection base to pre-exist.** `gocmd sync SRC DEST`
   is dual-mode: if DEST exists it creates `DEST/basename(SRC)`; if DEST does
@@ -59,11 +50,31 @@ repo's `docs/FOLLOWUPS.md`.)
   always does in production. If a future flow targets a fresh sub-collection,
   `gocmd mkdir` it first.
 
-- **1M-file scale: use gocmd's native bundling, not hand-rolled tar.** `gocmd
-  sync` has built-in `--bulk_upload` (`--max_bundle_size` / `--max_file_num`);
-  `yoda-sync.sh` exposes it via `YODA_BULK=1`. For the 1M-transcript / ~100-shard
-  campaign, enable it and tune the bundle knobs once real throughput is measured
-  (pilot-scale delivery is fine without it).
+- **1M-file scale: bulk_upload is DEAD on Yoda — a delivery redesign is needed.**
+  Disproven 2026-07-06: `--bulk_upload` (exposed as `YODA_BULK=1`) fails on
+  Yoda — its `.gocmd_staging` collection is rejected by gocommands' staging
+  safety check on research group collections, and `nluu10p` users have no
+  personal home collection to redirect `--irods_temp` to. Remove or rewrite
+  the `YODA_BULK` option. Measured file-per-file throughput is ~1.5 files/s at
+  15 threads (server per-op latency ~3 s; collection create ~3 s), so the
+  campaign (~2M files) is infeasible as a plain sync (~weeks). Options:
+  (a) tar-mode in `yoda-sync.sh` (per-shard/per-batch archives; changes restore
+  semantics); (b) FSW admin-side bulk ingest (server-side extraction of an
+  uploaded archive) — question pending with FSW tech support. Pilot scale
+  (≤~10k files) is tolerable as-is. See `yoda-operations.md`.
+
+- **`yoda-sync.sh` uploads hidden files/dirs.** `gocmd sync` copies dotfiles;
+  a `.work/` scratch tree inside `transcripts/` (ytdlp temp dirs, can hold
+  large media) went to Yoda in live testing before being caught. Exclude
+  hidden entries (check the installed gocmd for `--exclude_hidden_files`; else
+  stage via glob). Same pass: default `--thread_num` to ~10 — 30 threads
+  saturated the server and made the portal unusable for all users (2026-07-06).
+
+- **DAP lifecycle guidance belongs in the catalog-item docs.** Data-access
+  passwords appear permanently invalidated after failed-attempt bursts (fresh
+  ones work immediately; mechanism unconfirmed, asked of FSW). Researcher
+  instruction: generate a fresh DAP right before provisioning; if provisioning
+  fails auth, regenerate — don't retry the old one. See `yoda-operations.md`.
 
 - **`research-drive` backend is a reserved stub.** The selector accepts it but
   `preflight` hard-fails with guidance (mount + use `src-volume`, or use `yoda`).
