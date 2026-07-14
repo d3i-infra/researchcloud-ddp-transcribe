@@ -70,6 +70,11 @@ operator: minute-plus portal loads are typical for this instance).
 | 30 transfer threads | **saturates the server** — portal became unusable for all users; no server-side throttle observed |
 | Server-side tar extraction (`gocmd bun -x`) | **~13–14 files/s**, steady 300 → 2,000 files (23.6 s / 2 m 22 s); `-f` re-extract of an unchanged/1-changed 300-file shard ~5.6–5.8 s |
 | Large single object (`gocmd put`, 1 GB) | 12.0 s ≈ 85 MB/s, bandwidth-bound at default threads |
+| Shard-tar milestone push+extract (`yoda-sync.sh push`, 450 files / 3 shards + state, first delivery) | 54 s (measured 2026-07-14, dev machine) |
+| Shard-tar no-op push (checksum skip, 0 extractions) | 7.2 s (measured 2026-07-14) |
+| Shard-tar single-shard delta (1 tar re-upload + 1 `bun -x`) | 10.8 s (measured 2026-07-14) |
+| Shard-tar restore (`pull-resume`: state + 3 tars + local extract) | 6.8 s, tree byte-identical (measured 2026-07-14) |
+| Same 452 files via `push-transcripts-plain` (per-file) | **6 m 18 s** (~1.2 files/s — the baseline, live; 7× slower than tar delivery even at toy scale) |
 
 Consequences:
 

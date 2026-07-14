@@ -185,6 +185,17 @@ operator-from-dev-machine use):
    5.1 s; `bun -x` 300 files 23.6 s; 2,000 files 2 m 22 s; `-f` re-extract
    ~5.6–5.8 s).
 
+**Validated live 2026-07-14** (dev machine → `fsw.data.uu.nl`, scratch
+sub-collection, 450-file/3-shard fixture): all checks passed — first
+`push` 54 s (tars + 3 extractions + state; dotfiles excluded), no-op push
+7.2 s / 0 changed, single-shard delta 10.8 s / exactly one re-upload +
+one extraction with byte-correct content in the projection, `pull-resume`
+6.8 s with `diff -r` byte-identical tree (confirming the `gocmd get`
+landing rule and never touching the projection), and
+`push-transcripts-plain` round-tripped the same content in 6 m 18 s
+(~1.2 files/s — the per-file baseline this design exists to avoid).
+Timings recorded in `yoda-operations.md`.
+
 ## Documentation updates
 
 - `FOLLOWUPS.md`: close the 1M-scale delivery-redesign item (shard tars +
