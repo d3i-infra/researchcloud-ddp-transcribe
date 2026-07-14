@@ -42,8 +42,7 @@ set -euo pipefail
 
 : "${YODA_COLLECTION:?set YODA_COLLECTION to the iRODS collection base path}"
 
-# gocmd addresses iRODS paths with an `i:` prefix. VERIFY against the installed
-# gocmd version (older builds used bare paths for some subcommands).
+# gocmd addresses iRODS paths with an `i:` prefix (verified against v0.12.2).
 irods() { printf 'i:%s' "$1"; }
 
 # Staging dir for shard tars. Its basename MUST be `transcripts-tars`:
@@ -110,7 +109,12 @@ pull_transcript_tars() {
     # batch — fine) from "gocmd get landed them somewhere else" (landing-rule
     # mismatch — a restore that silently restores NOTHING must never look
     # like success on a disaster-recovery path).
-    if gocmd ls "$(irods "${YODA_COLLECTION}/transcripts-tars")" | grep -q 'shard-.*\.tar'; then
+    local listing
+    if ! listing="$(gocmd ls "$(irods "${YODA_COLLECTION}/transcripts-tars")")"; then
+      echo "[yoda-sync] ERROR: probe of transcripts-tars failed after get — cannot judge restore completeness; restore NOT performed" >&2
+      exit 1
+    fi
+    if grep -q 'shard-.*\.tar' <<<"${listing}"; then
       echo "[yoda-sync] ERROR: remote transcripts-tars contains shard tars but none landed in ${stage} — gocmd get landing-rule mismatch; restore NOT performed" >&2
       exit 1
     fi
@@ -138,7 +142,7 @@ push_transcripts() {
       changed+=("${name}")
     fi
   done
-  echo "[yoda-sync] push shard tars: ${stage} -> ${YODA_COLLECTION}/transcripts-tars (${#changed[@]} changed)"
+  echo "[yoda-sync] push shard tars: ${stage} -> ${YODA_COLLECTION}/transcripts-tars (${#changed[@]} pending extraction)"
   # Sync the staging dir at the collection base: gocmd's basename-append rule
   # lands it as <collection>/transcripts-tars. Unchanged shards are byte-
   # identical (reproducible tars) so the checksum diff skips them. Threads
@@ -198,6 +202,14 @@ pull_inbox() {
 }
 
 pull_resume() {
+  # The collection base must always be reachable (provisioning verifies it).
+  # Failing here distinguishes "network/auth outage" from "no tars yet" —
+  # otherwise an outage would silently reroute to the legacy path and the
+  # restore could exit 0 having restored NOTHING.
+  if ! gocmd ls "$(irods "${YODA_COLLECTION}")" >/dev/null 2>&1; then
+    echo "[yoda-sync] ERROR: collection ${YODA_COLLECTION} unreachable (network/auth?) — restore NOT performed" >&2
+    exit 1
+  fi
   if [ -n "${YODA_STATE_SNAPSHOT:-}" ]; then
     echo "[yoda-sync] pull state snapshot -> ${YODA_STATE_SNAPSHOT}"
     gocmd get -f "$(irods "${YODA_COLLECTION}/state-snapshot.sqlite")" "${YODA_STATE_SNAPSHOT}" \

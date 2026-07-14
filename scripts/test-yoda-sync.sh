@@ -199,11 +199,12 @@ echo 'sqlite-bytes' > "${R}/state-snapshot.sqlite"
 WORK4="${TMP}/work4-${RANDOM}"; mkdir -p "${WORK4}"
 export YODA_TRANSCRIPTS_LOCAL="${WORK4}/transcripts"
 export YODA_STATE_SNAPSHOT="${WORK4}/state.sqlite"
-if "${SYNC}" pull-resume; then
+if out="$("${SYNC}" pull-resume 2>&1)"; then
   ok "empty tars collection tolerated (exit 0)"
 else
   bad "empty tars collection tolerated (exit 0)"
 fi
+check "fresh-batch path taken (message present)" 'grep -q "fresh batch" <<<"${out}"'
 
 # ---- summary ------------------------------------------------------------------
 echo
