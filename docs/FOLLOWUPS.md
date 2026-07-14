@@ -34,23 +34,14 @@ repo's `docs/FOLLOWUPS.md`.)
 - **`scripts/tier2-docker.sh` "run 2 recap:" echo prints empty.** Cosmetic; the
   changed-count extraction still works. Fix when next touching the script.
 
-- **Yoda backend: two small runtime confirmations remain (most VERIFYs cleared).**
-  A live round-trip against UU Yoda (`fsw.data.uu.nl`, gocmd v0.12.2) confirmed:
-  the asset `gocmd-<ver>-linux-amd64.tar.gz` extracts a top-level `gocmd`; auth
-  works over `pam_password` with a data-access password; `gocmd ls`/`sync`/`put`
-  behave as the role/script assume; and the full `push`→`pull` round-trip is
-  byte-identical. Still to confirm at Tier 3 (needs the Co-Secret path, not just
-  a dev box): (1) the **env-var** auth (`IRODS_USER_PASSWORD`) completes
-  `gocmd init` **non-interactively** under Ansible (verified via the binary's
-  embedded `envconfig` tag + `--help`, not yet run headless), and (2) Yoda
-  accepts the requested `--ttl` (see next item).
-
-- **Yoda PAM token TTL — now a lever, verify the server cap.** `gocmd init --ttl
-  <hours>` sets the token lifetime; the role passes `yoda_auth_ttl_hours` (default
-  720). Confirm at Tier 3 that Yoda's server does not cap it lower (if it errors,
-  lower the value). The `creates: ~/.irods/.irodsA` sentinel means an expired
-  token won't refresh on a plain re-run — operator re-runs `gocmd init` if a batch
-  outlives the token.
+- **RESOLVED 2026-07-06 — Yoda runtime confirmations (see `yoda-operations.md`).**
+  Both remaining VERIFYs cleared by a live isolated-role run on the SRC
+  workspace: (1) `IRODS_USER_PASSWORD` completes `gocmd init` non-interactively
+  under Ansible — but **only with `-c`**; without it init interrogates stdin
+  and submits an empty password (this was a real defect, fixed in the role).
+  (2) Yoda accepts `--ttl 720`. The `creates:` sentinel is gone: the role now
+  probes token validity by `gocmd ls` exit code and re-inits on a stale token,
+  so an expired token refreshes on re-run.
 
 - **Yoda push requires the collection base to pre-exist.** `gocmd sync SRC DEST`
   is dual-mode: if DEST exists it creates `DEST/basename(SRC)`; if DEST does
@@ -59,11 +50,31 @@ repo's `docs/FOLLOWUPS.md`.)
   always does in production. If a future flow targets a fresh sub-collection,
   `gocmd mkdir` it first.
 
-- **1M-file scale: use gocmd's native bundling, not hand-rolled tar.** `gocmd
-  sync` has built-in `--bulk_upload` (`--max_bundle_size` / `--max_file_num`);
-  `yoda-sync.sh` exposes it via `YODA_BULK=1`. For the 1M-transcript / ~100-shard
-  campaign, enable it and tune the bundle knobs once real throughput is measured
-  (pilot-scale delivery is fine without it).
+- **RESOLVED 2026-07-13 — 1M-file scale: shard-tar delivery + server-side
+  extraction shipped.** `yoda-sync.sh push-transcripts` builds
+  byte-reproducible plain per-shard archives
+  (`transcripts-tars/shard-NN.tar`), syncs them (unchanged shards
+  checksum-skipped), and extracts changed shards server-side
+  (`gocmd bun -x -f -D tar`, ~13–14 files/s, ~9× the client-side per-file
+  rate) into a browsable `transcripts/` tree. `YODA_EXTRACT=0` gives an
+  archive-only sink; `push-transcripts-plain` keeps per-file delivery for
+  small pilots; `YODA_BULK`/`--bulk_upload` is deleted. NOTE the 2026-07-06
+  "server-side extraction likely blocked by policy" hypothesis was WRONG —
+  that failure was `bput`'s client-side staging guardrail; the server's
+  native extraction works fine. Design:
+  `docs/superpowers/specs/2026-07-10-yoda-shard-tar-delivery-design.md`.
+
+- **RESOLVED 2026-07-13 — hidden files no longer uploaded; threads capped.**
+  Shard-tar staging excludes hidden entries at tar time (the `.work/` leak),
+  and the push-side sync calls in `yoda-sync.sh` default to `--thread_num 10`
+  (override via `YODA_THREADS`; keep ≤15 — 30 saturated the server for all
+  users, 2026-07-06).
+
+- **DAP lifecycle guidance belongs in the catalog-item docs.** Data-access
+  passwords appear permanently invalidated after failed-attempt bursts (fresh
+  ones work immediately; mechanism unconfirmed, asked of FSW). Researcher
+  instruction: generate a fresh DAP right before provisioning; if provisioning
+  fails auth, regenerate — don't retry the old one. See `yoda-operations.md`.
 
 - **`research-drive` backend is a reserved stub.** The selector accepts it but
   `preflight` hard-fails with guidance (mount + use `src-volume`, or use `yoda`).
@@ -75,3 +86,23 @@ repo's `docs/FOLLOWUPS.md`.)
   `ansible-compat` on Python 3.14 (needs core ≥ 2.20). `yamllint` and
   `ansible-playbook --syntax-check` still run. Rebuild the venv with Python
   ≤ 3.12 for the full Tier-1 lint, or run lint in the Tier-2 container.
+
+- **RESOLVED 2026-07-13 — researcher hand-off via anonymous read tickets is
+  verified.** The iRODS `anonymous` user is enabled on fsw.data.uu.nl;
+  `gocmd mkticket -t read` + a 12-line credential-free config + a gocmd
+  binary gives a researcher `ls`/`get` on a collection with no UU account,
+  no DAP, no CO membership (three-way control test; denial presents as
+  "not found"). HYGIENE: default tickets have unlimited uses and NO expiry —
+  set one via `modticket` on any real hand-off; `rmticket` revokes;
+  `lsticket` audits. See `yoda-operations.md`.
+
+- **Does `bun -x -f` re-extraction mint a Yoda revision per overwritten
+  object?** Invisible to gocmd; storage-relevant at scale (every milestone
+  rewrites every file in changed shards). Asked of FSW (pending thread). If
+  costly, flip the `YODA_EXTRACT` default to 0 — one env var, no structural
+  change.
+
+- **Does the server finish or abandon a `bun -x` extraction if the client
+  disconnects at `--timeout`?** Untested (deliberately — server-load
+  politeness). Also for the FSW thread. Until known, size
+  `YODA_BUN_TIMEOUT` generously (default 1200 s covers ~10k-file shards).

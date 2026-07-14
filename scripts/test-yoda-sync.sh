@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# test-yoda-sync.sh — hermetic tests for scripts/yoda-sync.sh (no Yoda needed).
+# A fake `gocmd` on PATH maps i:<path> onto a local "remote" dir, so staging,
+# reproducibility, push/pull logic, server-side extraction (bun -x), and the
+# legacy fallback all run offline. The live-Yoda round trip is a separate
+# operator step (see the plan/spec).
+set -uo pipefail   # no -e: failures are counted and reported
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+SYNC="${HERE}/yoda-sync.sh"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "${TMP}"' EXIT
+
+export FAKE_REMOTE="${TMP}/remote"
+export FAKE_GOCMD_LOG="${TMP}/gocmd.log"
+
+# ---- fake gocmd (PATH shim) ------------------------------------------------
+mkdir -p "${TMP}/bin"
+cat > "${TMP}/bin/gocmd" <<'FAKE'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "gocmd $*" >> "${FAKE_GOCMD_LOG}"
+resolve() { case "$1" in i:*) printf '%s' "${FAKE_REMOTE}${1#i:}";; *) printf '%s' "$1";; esac; }
+cmd="$1"; shift
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --thread_num|--timeout|-D) shift 2 ;;
+    -*)                        shift ;;
+    *)                         args+=("$1"); shift ;;
+  esac
+done
+case "${cmd}" in
+  ls)
+    p="$(resolve "${args[0]}")"
+    [ -e "${p}" ] || { echo "not found: ${args[0]}" >&2; exit 1; }
+    ls "${p}"
+    ;;
+  sync)   # gocmd rule: DEST exists -> DEST/basename(SRC); else DEST gets contents
+    s="$(resolve "${args[0]}")"; d="$(resolve "${args[1]}")"
+    if [ -d "${d}" ]; then cp -r "${s}" "${d}/"; else mkdir -p "${d}"; cp -r "${s}/." "${d}/"; fi
+    ;;
+  put)
+    s="${args[0]}"; d="$(resolve "${args[1]}")"
+    mkdir -p "$(dirname "${d}")"; cp "${s}" "${d}"
+    ;;
+  get)    # collection -> lands as <dest>/<collname>; data object -> plain copy
+    s="$(resolve "${args[0]}")"; d="${args[1]}"
+    [ -e "${s}" ] || { echo "not found: ${args[0]}" >&2; exit 1; }
+    if [ -d "${s}" ]; then mkdir -p "${d}"; cp -r "${s}" "${d}/"; else mkdir -p "$(dirname "${d}")"; cp "${s}" "${d}"; fi
+    ;;
+  bun)    # server-side extraction: bun -x -f -D tar i:<tar> i:<dest-collection>
+    s="$(resolve "${args[0]}")"; d="$(resolve "${args[1]}")"
+    [ -e "${s}" ] || { echo "not found: ${args[0]}" >&2; exit 1; }
+    mkdir -p "${d}"; tar -xf "${s}" -C "${d}"
+    ;;
+  *) echo "fake gocmd: unhandled subcommand ${cmd}" >&2; exit 9 ;;
+esac
+FAKE
+chmod +x "${TMP}/bin/gocmd"
+export PATH="${TMP}/bin:${PATH}"
+
+# ---- helpers ----------------------------------------------------------------
+PASS=0; FAIL=0
+ok()  { PASS=$((PASS+1)); echo "  ok: $1"; }
+bad() { FAIL=$((FAIL+1)); echo "  FAIL: $1"; }
+check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+
+fresh_workdir() {
+  WORK="${TMP}/work-${RANDOM}"
+  mkdir -p "${WORK}/transcripts/00" "${WORK}/transcripts/17" "${WORK}/transcripts/.work"
+  echo '{"id":100}'      > "${WORK}/transcripts/00/100.json"
+  echo 'transcript 100'  > "${WORK}/transcripts/00/100.txt"
+  echo '{"id":217}'      > "${WORK}/transcripts/17/217.json"
+  echo 'secret scratch'  > "${WORK}/transcripts/17/.hidden"
+  echo 'big media'       > "${WORK}/transcripts/.work/media.mp4"
+  export YODA_COLLECTION="/nluu10p/home/research-test"
+  export YODA_TRANSCRIPTS_LOCAL="${WORK}/transcripts"
+  export YODA_STATE_SNAPSHOT="${WORK}/state-snapshot.sqlite"
+  unset YODA_TAR_STAGE 2>/dev/null || true
+  unset YODA_EXTRACT 2>/dev/null || true
+  R="${FAKE_REMOTE}${YODA_COLLECTION}"
+  rm -rf "${FAKE_REMOTE}"; mkdir -p "${R}"
+  : > "${FAKE_GOCMD_LOG}"
+}
+
+# ---- Task 1: staging ----------------------------------------------------------
+echo "— stage-transcripts"
+fresh_workdir
+"${SYNC}" stage-transcripts
+STAGE="${WORK}/transcripts-tars"
+check "stage dir created next to transcripts"  '[ -d "${STAGE}" ]'
+check "one tar per numeric shard, nothing else" '[ -f "${STAGE}/shard-00.tar" ] && [ -f "${STAGE}/shard-17.tar" ] && [ "$(ls "${STAGE}" | wc -l)" -eq 2 ]'
+check "no tar for hidden .work dir"            '! ls "${STAGE}" | grep -q work'
+check "in-shard dotfile excluded"              '! tar -tf "${STAGE}/shard-17.tar" | grep -q hidden'
+check "members rooted at NN/"                  'tar -tf "${STAGE}/shard-00.tar" | grep -qx "00/100.json"'
+
+echo "— reproducibility"
+sum1="$(md5sum "${STAGE}/shard-00.tar" | cut -d" " -f1)"
+touch "${WORK}/transcripts/00/100.json"        # mtime-only change
+"${SYNC}" stage-transcripts
+sum2="$(md5sum "${STAGE}/shard-00.tar" | cut -d" " -f1)"
+check "mtime-only change -> identical tar"     '[ "${sum1}" = "${sum2}" ]'
+echo 'changed' >> "${WORK}/transcripts/00/100.txt"
+"${SYNC}" stage-transcripts
+sum3="$(md5sum "${STAGE}/shard-00.tar" | cut -d" " -f1)"
+check "content change -> different tar"        '[ "${sum1}" != "${sum3}" ]'
+
+echo "— staging dir basename guard"
+fresh_workdir
+if YODA_TAR_STAGE="${TMP}/wrong-name" "${SYNC}" stage-transcripts 2>/dev/null; then
+  bad "wrong YODA_TAR_STAGE basename accepted"
+else
+  ok "wrong YODA_TAR_STAGE basename rejected"
+fi
+
+# ---- Task 2: push -------------------------------------------------------------
+echo "— push-transcripts (tars + server-side extraction)"
+fresh_workdir
+"${SYNC}" push-transcripts
+check "shard tars landed under transcripts-tars/" '[ -f "${R}/transcripts-tars/shard-00.tar" ] && [ -f "${R}/transcripts-tars/shard-17.tar" ]'
+check "sync used --thread_num 10"                 'grep -q -- "--thread_num 10" "${FAKE_GOCMD_LOG}"'
+check "extraction produced per-file tree"         '[ -f "${R}/transcripts/00/100.json" ] && [ -f "${R}/transcripts/17/217.json" ]'
+check "one bun call per shard, right flags"       '[ "$(grep -c "^gocmd bun " "${FAKE_GOCMD_LOG}")" -eq 2 ] && grep -q -- "-x -f -D tar --timeout 1200" "${FAKE_GOCMD_LOG}"'
+check "manifest written"                          '[ -f "${WORK}/.transcripts-tars-pushed.md5" ]'
+
+echo "— idempotent second push extracts nothing"
+: > "${FAKE_GOCMD_LOG}"
+"${SYNC}" push-transcripts
+check "no bun calls when nothing changed"         '! grep -q "^gocmd bun " "${FAKE_GOCMD_LOG}"'
+
+echo "— single-shard change extracts exactly that shard"
+echo 'more' >> "${WORK}/transcripts/17/217.json"
+: > "${FAKE_GOCMD_LOG}"
+"${SYNC}" push-transcripts
+check "exactly one bun call"                      '[ "$(grep -c "^gocmd bun " "${FAKE_GOCMD_LOG}")" -eq 1 ]'
+check "it targeted shard-17"                      'grep "^gocmd bun " "${FAKE_GOCMD_LOG}" | grep -q "shard-17.tar"'
+check "updated content reached the projection"    'grep -q more "${R}/transcripts/17/217.json"'
+
+echo "— YODA_EXTRACT=0 skips extraction"
+fresh_workdir
+YODA_EXTRACT=0 "${SYNC}" push-transcripts
+check "tars pushed"                               '[ -f "${R}/transcripts-tars/shard-00.tar" ]'
+check "no extraction happened"                    '[ ! -d "${R}/transcripts" ] && ! grep -q "^gocmd bun " "${FAKE_GOCMD_LOG}"'
+
+echo "— extraction deferred by YODA_EXTRACT=0 happens on the next default push"
+: > "${FAKE_GOCMD_LOG}"
+"${SYNC}" push-transcripts
+check "deferred shards extracted now"             '[ "$(grep -c "^gocmd bun " "${FAKE_GOCMD_LOG}")" -eq 2 ] && [ -f "${R}/transcripts/00/100.json" ]'
+
+echo "— push (tars + state)"
+fresh_workdir
+echo 'sqlite-bytes' > "${YODA_STATE_SNAPSHOT}"
+"${SYNC}" push
+check "shard tars landed"      '[ -f "${R}/transcripts-tars/shard-00.tar" ]'
+check "state snapshot landed"  '[ -f "${R}/state-snapshot.sqlite" ]'
+
+echo "— push-transcripts-plain (escape hatch)"
+fresh_workdir
+"${SYNC}" push-transcripts-plain
+check "plain tree landed as transcripts/" '[ -f "${R}/transcripts/00/100.json" ]'
+
+echo "— bulk upload removed"
+check "no bulk_upload/YODA_BULK left in yoda-sync.sh" '! grep -qi "bulk" "${SYNC}"'
+
+# ---- Task 3: pull-resume --------------------------------------------------------
+echo "— pull-resume (tar path)"
+fresh_workdir
+echo 'sqlite-bytes' > "${YODA_STATE_SNAPSHOT}"
+"${SYNC}" push
+EXPECTED_TREE="${TMP}/expected-tree"
+rm -rf "${EXPECTED_TREE}"; cp -r "${WORK}/transcripts" "${EXPECTED_TREE}"
+WORK2="${TMP}/work2-${RANDOM}"; mkdir -p "${WORK2}"
+export YODA_TRANSCRIPTS_LOCAL="${WORK2}/transcripts"
+export YODA_STATE_SNAPSHOT="${WORK2}/state.sqlite"
+"${SYNC}" pull-resume
+check "state snapshot restored"                     '[ -f "${WORK2}/state.sqlite" ]'
+check "restore pulled tars, not the projection"     'grep -q "^gocmd get .*transcripts-tars" "${FAKE_GOCMD_LOG}"'
+check "extracted tree matches source (sans hidden)" 'diff -r --exclude=".*" "${EXPECTED_TREE}" "${WORK2}/transcripts" >/dev/null'
+check "hidden entries were never restored"          '[ ! -e "${WORK2}/transcripts/17/.hidden" ] && [ ! -d "${WORK2}/transcripts/.work" ]'
+
+echo "— pull-resume (legacy plain fallback)"
+fresh_workdir
+mkdir -p "${R}/transcripts/42"
+echo 'legacy' > "${R}/transcripts/42/4242.txt"
+echo 'sqlite-bytes' > "${R}/state-snapshot.sqlite"
+WORK3="${TMP}/work3-${RANDOM}"; mkdir -p "${WORK3}"
+export YODA_TRANSCRIPTS_LOCAL="${WORK3}/transcripts"
+export YODA_STATE_SNAPSHOT="${WORK3}/state.sqlite"
+"${SYNC}" pull-resume
+check "legacy plain tree pulled"   '[ -f "${WORK3}/transcripts/42/4242.txt" ]'
+check "state snapshot restored"    '[ -f "${WORK3}/state.sqlite" ]'
+
+echo "— pull-resume (empty tars collection = fresh batch, not an error)"
+fresh_workdir
+mkdir -p "${R}/transcripts-tars"
+echo 'sqlite-bytes' > "${R}/state-snapshot.sqlite"
+WORK4="${TMP}/work4-${RANDOM}"; mkdir -p "${WORK4}"
+export YODA_TRANSCRIPTS_LOCAL="${WORK4}/transcripts"
+export YODA_STATE_SNAPSHOT="${WORK4}/state.sqlite"
+if out="$("${SYNC}" pull-resume 2>&1)"; then
+  ok "empty tars collection tolerated (exit 0)"
+else
+  bad "empty tars collection tolerated (exit 0)"
+fi
+check "fresh-batch path taken (message present)" 'grep -q "fresh batch" <<<"${out}"'
+
+# ---- summary ------------------------------------------------------------------
+echo
+echo "passed: ${PASS}  failed: ${FAIL}"
+[ "${FAIL}" -eq 0 ]
