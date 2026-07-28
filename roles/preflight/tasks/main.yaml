@@ -93,9 +93,24 @@
     (storage_path | default('') | length == 0)
     or ('<' in storage_path | default(''))
 
+- name: Inspect the data dir itself (it may be a symlink to a shared mount root)
+  ansible.builtin.stat:
+    path: "{{ storage_data_root | default(pipeline_home ~ '/data') }}"
+    follow: false
+  register: storage_data_root_stat
+  when: storage_mount_targets is defined
+
+- name: Resolve the real data root (follow a symlinked ~/data)
+  ansible.builtin.set_fact:
+    storage_data_root_real: >-
+      {{ storage_data_root_stat.stat.lnk_source
+         if (storage_data_root_stat.stat.islnk | default(false))
+         else (storage_data_root | default(pipeline_home ~ '/data')) }}
+  when: storage_mount_targets is defined
+
 - name: List entries under the data dir (volumes may be symlinks to a shared mount)
   ansible.builtin.find:
-    paths: "{{ storage_data_root | default(pipeline_home ~ '/data') }}"
+    paths: "{{ storage_data_root_real }}"
     file_type: any
     recurse: false
   register: storage_data_entries
@@ -130,7 +145,7 @@
   ansible.builtin.fail:
     msg: >-
       Multiple storage volumes are mounted under
-      {{ storage_data_root | default(pipeline_home ~ '/data') }}
+      {{ storage_data_root_real }}
       ({{ storage_candidates | join(', ') }}) — set storage_path explicitly
       to the one the pipeline should use (or detach the others).
   when:
@@ -151,7 +166,7 @@
       - storage_root | length > 0
     fail_msg: >-
       The '{{ storage_backend }}' backend needs a storage volume: none was
-      auto-detected under {{ storage_data_root | default(pipeline_home ~ '/data') }}
+      auto-detected under {{ storage_data_root_real | default('~/data') }}
       and no usable storage_path was supplied (a value containing '<' is
       treated as an unedited placeholder, i.e. unset). Attach a volume at
       launch (SRC mounts it at /home/<user>/data/<volume-name>), or set
