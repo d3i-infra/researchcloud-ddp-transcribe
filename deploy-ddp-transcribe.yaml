@@ -19,12 +19,20 @@
 #
 # Required parameters (no defaults — provisioning fails fast without them):
 #   pipeline_user   workspace user that owns the run scripts and state dir
-#   storage_path    mount point of the attached storage volume, e.g.
-#                   /home/<user>/data/<volume> — required for mount backends
-#                   (src-volume / research-drive); unused for yoda.
 #   yoda_collection iRODS collection base path (e.g. /nluu10p/home/research-foo)
 #   yoda_user       Yoda username (e.g. exampleuser@uu.nl) — yoda backend only
 #   yoda_data_access_password  Yoda data-access password (Co-Secret) — yoda only
+#
+# Optional parameters:
+#   storage_path    override for the storage volume mount path (absolute,
+#                   e.g. /home/<user>/data/<volume>; '~' is NOT expanded).
+#                   Normally leave unset/placeholder: preflight auto-detects
+#                   the single volume mounted under <home>/data and resolves
+#                   it into the storage_root fact all consumers use (an
+#                   unedited '<...>' placeholder counts as unset; multiple
+#                   volumes fail loudly asking for an explicit path). Mount
+#                   backends fail without a resolved volume; on yoda a
+#                   resolved volume activates tiered mode.
 #
 # All other parameters carry defaults below; SRC parameter values arrive
 # as extra-vars and take precedence. Booleans may arrive as strings —

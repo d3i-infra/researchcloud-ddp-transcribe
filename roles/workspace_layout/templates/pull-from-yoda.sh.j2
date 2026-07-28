@@ -6,15 +6,15 @@
 set -euo pipefail
 
 YODA_COLLECTION="{{ yoda_collection }}" \
-YODA_INBOX_LOCAL="{{ storage_path }}/inbox" \
+YODA_INBOX_LOCAL="{{ storage_root }}/inbox" \
   "{{ pipeline_home }}/yoda-sync.sh" pull-inbox
 
 # Fresh volume (no snapshot yet): also pull prior campaign state +
 # transcripts from Yoda so a rebuilt volume resumes instead of restarting.
-if [ ! -f "{{ storage_path }}/state-snapshot.sqlite" ]; then
+if [ ! -f "{{ storage_root }}/state-snapshot.sqlite" ]; then
   YODA_COLLECTION="{{ yoda_collection }}" \
-  YODA_STATE_SNAPSHOT="{{ storage_path }}/state-snapshot.sqlite" \
-  YODA_TRANSCRIPTS_LOCAL="{{ storage_path }}/transcripts" \
+  YODA_STATE_SNAPSHOT="{{ storage_root }}/state-snapshot.sqlite" \
+  YODA_TRANSCRIPTS_LOCAL="{{ storage_root }}/transcripts" \
     "{{ pipeline_home }}/yoda-sync.sh" pull-resume
 fi
 echo "volume seeded/refreshed from {{ yoda_collection }}"

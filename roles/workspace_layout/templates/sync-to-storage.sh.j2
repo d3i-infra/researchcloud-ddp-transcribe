@@ -30,11 +30,11 @@ echo "synced (yoda): transcripts + state -> {{ yoda_collection }}"
 # Mount-based sink (src-volume / mounted Research Drive).
 # Durable transcript sink: rsync the sharded NN/ tree boot disk -> volume.
 # write-once atomic artifacts make this safe even if a run is still active.
-rsync -a "{{ work_dir }}/transcripts/" "{{ storage_path }}/transcripts/"
+rsync -a "{{ work_dir }}/transcripts/" "{{ storage_root }}/transcripts/"
 
 # Consistent online snapshot of the state DB (NOT a raw copy of a live WAL),
 # so a rebuilt workspace can resume via restore-from-storage.sh.
-sqlite3 "{{ state_dir }}/state.sqlite" ".backup '{{ storage_path }}/state-snapshot.sqlite'"
+sqlite3 "{{ state_dir }}/state.sqlite" ".backup '{{ storage_root }}/state-snapshot.sqlite'"
 
-echo "synced: transcripts -> {{ storage_path }}/transcripts; state -> {{ storage_path }}/state-snapshot.sqlite"
+echo "synced: transcripts -> {{ storage_root }}/transcripts; state -> {{ storage_root }}/state-snapshot.sqlite"
 {% endif %}

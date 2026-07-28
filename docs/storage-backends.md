@@ -109,11 +109,15 @@ HOT (boot disk)                INTERIM (SRC volume)              DURABLE (Yoda)
    restore-from-storage.sh              pull-from-yoda.sh (inbox + resume state)
 ```
 
-**Activation:** tiered mode is `storage_backend: yoda` **and** a non-blank
-`storage_path` — plain `yoda` (blank `storage_path`) and `src-volume` behavior
-are both unchanged. An unedited placeholder value in `storage_path` (still
-containing `<`, e.g. `<volume-mount-path>`) counts as unset, so a volume-less
-yoda launch doesn't accidentally trip tiered mode.
+**Activation:** tiered mode is `storage_backend: yoda` **and** a resolved
+storage volume. Preflight resolves the volume automatically: SRC mounts
+attached volumes at `/home/<user>/data/<volume-name>`, and exactly one mount
+there is adopted with no parameter needed (multiple mounts fail loudly and
+ask for an explicit `storage_path`; an unedited `<...>` placeholder counts as
+unset). The resolved path lives in the `storage_root` fact — SRC parameters
+arrive as extra-vars, which `set_fact` cannot override, so the raw
+`storage_path` input and the resolved fact are deliberately distinct names.
+Plain `yoda` (no volume attached) and `src-volume` behavior are unchanged.
 
 **Scripts:**
 

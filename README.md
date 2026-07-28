@@ -46,7 +46,7 @@ window. A rebuilt workspace resumes a batch via `~/restore-from-storage.sh`.
 
 | Parameter | Default | Catalog action | Meaning |
 |---|---|---|---|
-| `storage_path` | *(required for mount backends)* | interactive | Mount point of the attached storage volume, e.g. `/home/<user>/data/<volume>`. Mount backends (`src-volume`/`research-drive`): the durable sink, required. `yoda`: optional interim fast tier — blank (or an unedited placeholder) goes direct to Yoda; a real mount point activates tiered mode |
+| `storage_path` | *(auto-detected)* | interactive | Optional override for the storage volume mount. Normally leave unset/placeholder: preflight adopts the single volume mounted under `/home/<user>/data/` (multiple volumes fail loudly and need an explicit path). Mount backends require a volume (detected or explicit); `yoda`: a resolved volume activates tiered mode, none goes direct to Yoda |
 | `pipeline_user` | *(required)* | interactive | Workspace user that owns run scripts, source tree, and state dir |
 | `storage_backend` | `src-volume` | interactive | Durable backend: `src-volume` (mount, rsync), `yoda` (iRODS via GoCommands), `research-drive` (reserved) |
 | `yoda_collection` | *(yoda only)* | interactive | iRODS collection base, e.g. `/nluu10p/home/research-foo` |
@@ -82,8 +82,9 @@ The transcription hot path is always the boot disk; only the durable side differ
 - **`research-drive`** — reserved; `preflight` hard-fails with guidance until the
   WebDAV mount is wired (see `docs/FOLLOWUPS.md`).
 
-**Tiered mode** activates when `storage_backend: yoda` **and** `storage_path`
-is a real (non-blank, non-placeholder) mount point: an SRC volume then sits
+**Tiered mode** activates when `storage_backend: yoda` **and** a storage
+volume is attached (auto-detected under `~/data`; `storage_path` is only an
+override for the multi-volume case): the SRC volume then sits
 between the boot disk and Yoda as a fast interim tier for campaign scale.
 `sync-to-storage.sh` (hop 1, automatic at every batch end) syncs boot disk →
 volume; `push-to-yoda.sh` (hop 2, operator-driven, ~daily) pushes volume →
