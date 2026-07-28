@@ -115,4 +115,14 @@ rm -rf "${DATA}"; mkdir -p "${DATA}/not-a-volume"
 run c9.log -e storage_backend=src-volume -e '{"storage_mounts_source": []}'
 check "stray dir: play fails (no volume)"    grep -q 'failed=1' "${TMP}/c9.log"
 
+# ---- 10. the data dir ITSELF is a symlink to a shared mount root -----------
+# Live-observed flavor (2026-07-28 launch failure): ~/data -> /data (shared),
+# volumes are real dirs under the target and the mount table lists the REAL
+# paths. Detection must resolve the root symlink before walking.
+rm -rf "${DATA}"; mkdir -p "${TMP}/sharedroot/vol1"
+ln -s "${TMP}/sharedroot" "${DATA}"
+run c10.log -e storage_backend=src-volume -e "$(mounts "${TMP}/sharedroot/vol1")"
+check "symlinked data root: play succeeds"   bash -c "! grep -q 'failed=1' '${TMP}/c10.log'"
+check "symlinked data root: volume adopted"  grep -qF "RESOLVED storage_root=[${TMP}/sharedroot/vol1]" "${TMP}/c10.log"
+
 echo; [ "${FAIL}" -eq 0 ] && echo "ALL PASS" || { echo "${FAIL} FAILURES"; exit 1; }
