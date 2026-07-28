@@ -6,7 +6,7 @@
 # idempotent. Run ONCE on a rebuilt workspace, before the first `process`.
 set -euo pipefail
 
-{% if storage_backend == 'yoda' %}
+{% if storage_backend == 'yoda' and not tiered_storage | bool %}
 # Yoda (iRODS) seed via GoCommands. Pull the state snapshot (straight to the
 # live state DB) + any prior transcripts, then the inbox so `ingest` has input
 # (the mount backends read inbox in place; Yoda has no mount, so it is pulled).
@@ -17,6 +17,27 @@ YODA_TRANSCRIPTS_LOCAL="{{ work_dir }}/transcripts" \
 YODA_COLLECTION="{{ yoda_collection }}" \
 YODA_INBOX_LOCAL="{{ work_dir }}/inbox" \
   "{{ pipeline_home }}/yoda-sync.sh" pull-inbox
+{% elif tiered_storage | bool %}
+# Tiered mode: restore boot from the interim volume (fast). The volume is
+# seeded/refreshed from Yoda by ~/pull-from-yoda.sh (slow, operator-driven).
+if [ ! -f "{{ storage_path }}/state-snapshot.sqlite" ] \
+   && [ -z "$(ls -A "{{ storage_path }}/inbox" 2>/dev/null)" ]; then
+  echo "volume at {{ storage_path }} has no state snapshot and an empty inbox" >&2
+  echo "— seed it from Yoda first: ~/pull-from-yoda.sh" >&2
+  exit 1
+fi
+if [ -f "{{ storage_path }}/state-snapshot.sqlite" ]; then
+  cp "{{ storage_path }}/state-snapshot.sqlite" "{{ state_dir }}/state.sqlite"
+  echo "restored state DB from {{ storage_path }}/state-snapshot.sqlite"
+else
+  echo "no state snapshot on the volume — fresh campaign (inbox present)"
+fi
+if [ -d "{{ storage_path }}/transcripts" ]; then
+  rsync -a "{{ storage_path }}/transcripts/" "{{ work_dir }}/transcripts/"
+  echo "restored transcripts to {{ work_dir }}/transcripts"
+fi
+rsync -a "{{ storage_path }}/inbox/" "{{ work_dir }}/inbox/"
+echo "hydrated inbox: {{ storage_path }}/inbox -> {{ work_dir }}/inbox"
 {% else %}
 if [ -f "{{ storage_path }}/state-snapshot.sqlite" ]; then
   cp "{{ storage_path }}/state-snapshot.sqlite" "{{ state_dir }}/state.sqlite"

@@ -17,7 +17,8 @@ repo's `docs/FOLLOWUPS.md`.)
   on 2 GPUs (~1 video/s) the downloader, not transcription, is the probable
   bottleneck over a multi-week pull — and the main TikTok rate-limiting exposure.
   Tune per-machine once live throughput is observed; consider a higher default
-  for GPU flavors.
+  for GPU flavors. 2026-07-28: made Interactive at the catalog item — set
+  per-launch, tune from observed throughput (see `catalog-item.md`).
 
 - **`pipeline_user` could be dropped via a user-agnostic redesign.** Today the
   pipeline installs a per-user toolchain (rustup, pipx yt-dlp) and lays out its
@@ -70,11 +71,16 @@ repo's `docs/FOLLOWUPS.md`.)
   (override via `YODA_THREADS`; keep ≤15 — 30 saturated the server for all
   users, 2026-07-06).
 
-- **DAP lifecycle guidance belongs in the catalog-item docs.** Data-access
-  passwords appear permanently invalidated after failed-attempt bursts (fresh
-  ones work immediately; mechanism unconfirmed, asked of FSW). Researcher
-  instruction: generate a fresh DAP right before provisioning; if provisioning
-  fails auth, regenerate — don't retry the old one. See `yoda-operations.md`.
+- **RESOLVED 2026-07-28 — DAP lifecycle guidance belongs in the catalog-item
+  docs.** Data-access passwords appear permanently invalidated after
+  failed-attempt bursts (fresh ones work immediately; mechanism unconfirmed,
+  asked of FSW). Moved to `catalog-item.md`'s pre-launch CO setup section:
+  generate a fresh DAP right before provisioning; if provisioning fails auth,
+  regenerate — don't retry the old one. See `yoda-operations.md` for the
+  underlying evidence.
+
+- **Mid-campaign PAM token renewal is manual** (`yoda-operations.md` §Mid-campaign
+  token renewal); revisit only if renewals get missed in practice.
 
 - **`research-drive` backend is a reserved stub.** The selector accepts it but
   `preflight` hard-fails with guidance (mount + use `src-volume`, or use `yoda`).

@@ -1,314 +1,234 @@
-# DDP Transcribe — catalog item record & registration runbook
+# DDP Transcribe — catalog item record, remake delta, and launch runbook
 
-This doc is two things: the **registration runbook** (concrete values for the
-portal wizard — Phase 4 of the deployment plan) and the **item record** (filled
-in once the item is live). General portal mechanics live in the SURF-distilled
-`surf_research_cloud/runbooks/create-catalog-item.md`; this page only carries
-the ddp-transcribe-specific values and the decisions you must make at the portal.
+The **DDP Transcribe** catalog item already exists and is live in the SURF
+Research Cloud (SRC) portal. This doc is:
 
-## Decisions to make before you start the wizard
+1. **Item record** — the audited current state of the portal item (§1).
+2. **Delta** — the portal edits this remake pushes, to add the Yoda tiered-storage
+   surface (§2).
+3. **Pre-launch CO setup** the launching CO must do before provisioning (§3).
+4. **Launch runbook** for the 3M-video campaign machine, which doubles as this
+   remake's Tier-5 validation (§4).
+5. **Snag list** — every known way the deploy can fail, kept current (§5).
+6. **Validation log** — filled in at launch (§6).
 
-These are portal facts I can't see; settle them first.
+General portal mechanics (wizard navigation, component vs. item concepts) live
+in the SURF-distilled `surf_research_cloud/runbooks/create-catalog-item.md`;
+this page only carries ddp-transcribe-specific values and decisions.
 
-- [ ] **Owner CO** — *permanent, cannot be changed later.* The existing
-  "Next for data donation" item is owned by **D3I data donation**; using the same
-  CO is the obvious default unless you want this item maintained separately.
-- [ ] **Exact flavour names** — confirm the SURF HPC Cloud GPU flavour names and,
-  critically, that a **2×A10** flavour exists (the two-instance design needs two
-  physical GPUs in one workspace). If SURF only offers 1×A10, the 2-GPU path is
-  blocked and we ship CPU + 1×A10 only.
-- [ ] **Developer rights** in the owner CO (`src_co_developer` SRAM group) — without
-  these the **Development** tab won't appear.
+## 1. Item record (current, audited 2026-07-28)
 
-## Step A — Register the component (Development → Components → +)
-
-The component is created **before** the catalog item (a non-SURF component can't
-be added to an item until it exists). The "Add component" wizard has 5 steps.
-
-**Step 1 — script source:**
-
-| Field | Value |
-|---|---|
-| Component script type | Ansible Playbook |
-| Source Url repository | `https://github.com/d3i-infra/researchcloud-ddp-transcribe.git` |
-| Path | `deploy-ddp-transcribe.yaml` |
-| Tag | `main` — *version of the **component repo** SRC clones; distinct from the `pipeline_git_ref` parameter, which pins the **pipeline repo** the playbook builds* |
-| Access format / label | leave blank (no web UI — SSH only) |
-| Script availability | "publicly available on Git" if the component repo is public; else fixed / CO-secret credentials |
-
-**Step 2 — name, subtitle, description** (developer-facing; the catalog item has
-its own user-facing set in Step C):
-
-- **Name:** `ddp-transcribe`
-- **Subtitle:** Provisions a video-transcription pipeline workspace (CUDA, Rust, yt-dlp, whisper models)
-- **Description:** Ansible playbook that bakes a `ddp-transcribe` workspace.
-  **Base OS: Ubuntu 24.04** (the `libclang-18-dev` pin is 24.04-specific). Builds
-  the pipeline from a pinned git ref with whisper-rs (`--features cuda` on GPU
-  flavours), installs `yt-dlp[curl-cffi]` and the selected whisper models, lays
-  out inbox/transcripts/archive on the attached volume and the state DB on the
-  boot disk. CUDA toolkit 13.2 is detect-else-install; never installs drivers.
-  Operator-driven, SSH only.
-- **Icon:** `assets/icon.png` (d3i brand palette; <100KB, reads at 32–40px)
-
-**Step 3 — parameters:** **DO NOT SKIP.** SRC does *not* auto-discover variables
-from the playbook — you must declare each parameter here by hand, or it will not
-appear at the catalog item's Parameters step (a param "not explicitly required by
-a component has no effect"). Declare exactly these (defaults match the playbook's
-`vars:`; the two without a default are required):
-
-Each declaration has a **Source type** (`Fixed` / `Resource` / `Co-Secret` /
-`Workspace`) and an **Overwritable** checkbox. For all ten of ours: Source type
-= **`Fixed`** (a literal value you type) and **Overwritable = checked** — the
-Overwritable flag is what lets the catalog item later "Make interactive" or
-"Overwrite"; unchecked locks the value at the component default.
-
-Each parameter also takes a short **Description** (shown to the workspace creator
-for the interactive ones); suggested text in the last column.
-
-| Parameter | Source type | Default value | Overwritable | Description |
-|---|---|---|---|---|
-| `storage_path` | Fixed | *(blank — required for mount backends)* | ✓ | Mount point of the attached storage volume (e.g. `/home/<user>/data/<volume>`); holds inbox, transcripts, archive. Required for `src-volume`; unused for `yoda`. |
-| `pipeline_user` | Fixed | *(blank — required)* | ✓ | Workspace account that owns the source tree, run scripts, and state DB (your SRC username, e.g. `dmccool`). |
-| `storage_backend` | Fixed | `src-volume` | ✓ | Durable-storage backend: `src-volume` (attached/Research Drive mount, rsync), `yoda` (iRODS collection via GoCommands), `research-drive` (reserved). |
-| `yoda_collection` | Fixed | *(blank)* | ✓ | **yoda only.** iRODS collection base path, e.g. `/nluu10p/home/research-foo`; holds inbox, the transcript shard archives (`transcripts-tars/`) plus their server-side-extracted per-file tree (`transcripts/`), and the state snapshot. |
-| `yoda_user` | Fixed | *(blank)* | ✓ | **yoda only.** Yoda username, e.g. `exampleuser@uu.nl`. |
-| `yoda_host` | Fixed | `fsw.data.uu.nl` | ✓ | **yoda only.** iRODS host (UU default). |
-| `yoda_zone` | Fixed | `nluu10p` | ✓ | **yoda only.** iRODS zone (UU default). |
-| `yoda_data_access_password` | **Co-Secret** | *(secret)* | ✓ | **yoda only.** Yoda data-access password (created in the Yoda web portal → Data Transfer). Stored on the CO Secrets tab, resolved at provision. |
-| `model_large_v3_turbo` | Fixed | `true` | ✓ | Download the large-v3-turbo whisper model (~573 MB; recommended production model). |
-| `model_tiny_en` | Fixed | `false` | ✓ | Download the tiny.en whisper model (~75 MB; fast, English-only; for smoke tests). |
-| `model_small` | Fixed | `false` | ✓ | Download the small whisper model (~466 MB; multilingual fallback). |
-| `pipeline_git_ref` | Fixed | `v0.2.0-rc1` | ✓ | Git tag/ref of the ddp-transcribe pipeline to build. |
-| `download_workers` | Fixed | `3` | ✓ | Parallel video-download workers baked into the run scripts. |
-| `compute_lang_probs` | Fixed | `false` | ✓ | Add a per-language probability pass during transcription (~1.5–2× slower per video). |
-| `run_smoke_test` | Fixed | `false` | ✓ | Run an init+ingest against a bundled fixture during provisioning (verification only). |
-| `force_cpu_build` | Fixed | `false` | ✓ | Build without CUDA even on a GPU flavor (debug aid; also bypasses the GPU-without-driver hard-fail). |
-
-`pipeline_user` "required-ness" is enforced by making it interactive at the
-catalog item **and** the playbook's preflight `assert` backstop. `storage_path`
-is required only for the mount backends (`src-volume` / `research-drive`); the
-`yoda_*` params are required only for `storage_backend: yoda` — preflight asserts
-the right set per backend. The model flags' `true`/`false` values render as
-checkboxes once made interactive (the playbook coerces with `| bool`).
-
-**Yoda uses the component's first `Co-Secret`.** `yoda_data_access_password` is
-declared with Source type **`Co-Secret`**: create the secret on the owning CO's
-Secrets tab, and SRC resolves it into the `yoda_data_access_password` extra-var
-at provision. The `yoda` role feeds it to `gocmd init` (`no_log: true`) and never
-writes it to disk in cleartext. Quirk to watch: a literal `$` in a secret can be
-eaten by shell/compose interpolation — if the password contains `$`, verify it
-survives to `gocmd` (escape as `$$` if it reaches a compose-style layer).
-
-`Resource` and `Workspace` remain unused — note `Workspace` exposes only
-`co_id` / `co_name` / `co_irods`, **no per-user name**, so it *cannot* supply
-`pipeline_user` (a CO workspace has many users; the owning account must be chosen
-explicitly). `pipeline_user` stays Fixed + interactive, matching the d3i "Next"
-item's interactive-username pattern. Do *not* declare `co_passwordless_sudo` /
-`timeout` / `remote_ansible_version` here — those belong to SRC-CO and
-SRC-External plugin and surface at the catalog item Parameters step on their own.
-Internals (`pipeline_git_repo`, `cuda_*`, `gocmd_*`) stay as playbook vars,
-undeclared. No Component Secrets — the pipeline repo and all downloads (NVIDIA,
-HuggingFace, crates.io, GoCommands) are public/anonymous; the only secret is the
-`Co-Secret` above.
-
-> If you already created the component without parameters: **edit** it (don't
-> recreate). Editing overwrites the development version; the catalog item, which
-> references that development version, will then show the parameters.
-
-**Step 4 — owner & support:** owner CO (see decisions above), support url/name/email.
-
-**Step 5 — organizations:** **restrict to the owner CO** — component visibility
-*cannot be withdrawn*, so do not make it public.
-
-> **Two version pins, don't confuse them:** the Step 1 **Tag** pins the component
-> repo (`main`); the `pipeline_git_ref` parameter pins the pipeline repo
-> (`v0.2.0-rc1`). A provisioning-only fix changes the component (re-clone `main`,
-> re-run); a pipeline release changes `pipeline_git_ref` (rebuild).
-
-## Step B — Catalog item wizard, Step 1: Components (order matters)
-
-```
-1. SRC-OS
-2. SRC-CO
-3. SRC-External plugin  (the plain Ansible runner — NOT "Docker", "Docker
-   Compose", or "pluginansible2.11"; keep its remote_ansible_version at 9.1.0)
-4. CUDA                 ← SRC's own component (gitlab rsc-surf-nl/plugins/
-                          plugin-cuda). Installs a modern NVIDIA driver + CUDA
-                          (NVIDIA's *current* via the dynamic ubuntu2404 keyring
-                          — 13.3 + driver 610 as provisioned), gated on
-                          `'GPU' in flavour_name`. REQUIRED on GPU flavors: the
-                          stock ubuntu-24.04-rsc image ships no driver and
-                          SRC-OS/CO don't add one, so without this
-                          ddp-transcribe's cuda role hard-fails (GPU on PCI bus,
-                          nvidia-smi absent). Must come after SRC-External; it
-                          reboots (handled via async + wait_for_connection).
-5. ddp-transcribe        ← after CUDA; its cuda role then sees nvidia-smi work,
-                          finds nvcc present, and skips its own toolkit install.
-```
-
-**No SRC-Nginx** — the pipeline has no web UI; access is SSH only.
-
-> **CPU flavor:** the CUDA component self-gates on `'GPU' in flavour_name`, so it
-> cleanly no-ops on the CPU flavor — a mixed CPU/1×A10/2×A10 item is fine on one
-> component list. On CPU flavors ddp-transcribe's cuda role finds no GPU and
-> builds CPU-only (no `force_cpu_build` needed).
->
-> **CUDA version (NOT pinned on SRC):** the CUDA component does `apt install
-> cuda` off the dynamic keyring, so it pulls NVIDIA's **current** release —
-> **13.3 + driver 610** as provisioned (Tier 5), which built and linked cleanly.
-> ddp-transcribe's detect-else-install finds nvcc present and skips its pinned
-> 13.2, so the build links whatever SRC installed. **Risk:** the build CUDA
-> floats with NVIDIA's latest; a future release could break the whisper.cpp
-> build. If that bites, force our pinned toolkit (install even when nvcc is
-> present) or pin via the CUDA component. Tracked in FOLLOWUPS.
-
-## Step C — Name & description
-
-User-facing (the Catalog tab); keep distinct from the component's Step 2 set.
-
-- **Name:** DDP Transcribe
-- **Subtitle:** Video transcription pipeline for data-donation studies
-- **Description:** A ready-to-run workspace that transcribes donor-watched
-  videos from TikTok DDP exports. Whisper.cpp transcription (GPU-accelerated on
-  NVIDIA flavours); select your models at launch and point it at an attached
-  storage volume. SSH in and drive it with the generated run scripts
-  (`init` / `ingest` / `process`).
-- **Icon:** `assets/icon.png` (same as the component)
-
-## Step D — Owner & support
-
-- **Owner CO:** _(your decision above — PERMANENT)_
+- **Owner CO:** D3I data donation (permanent, matches the existing "Next for
+  data donation" item).
+- **Component:** `ddp-transcribe` — status **Development**, Tag `main`
+  (`d3i-infra/researchcloud-ddp-transcribe`, `deploy-ddp-transcribe.yaml`).
+- **Boot disk:** 100 GB.
+- **Flavours offered:** `16 Core - 64 GB RAM`, `A10 - 1 GPU`, `A10 - 2 GPU`.
+- **Allowed COs:** D3I data donation, develop-data-donation-pipelines-uu,
+  perceptions of crime policing - UU.
+- **Firewall:** inbound TCP 22/80/443; 80/443 are **immutable** and nothing
+  listens on them — expected, not a bug, leave alone (S15).
+- **Overwrites in force:** `timeout=7200`, `co_passwordless_sudo=true`.
+- **Support:** Danielle McCool, D.M.McCool@uu.nl.
 - **Documentation URL:** `https://github.com/d3i-infra/researchcloud-ddp-transcribe`
-- **Support name / email:** _(maintainer)_
+- **Components (in order):** SRC-OS, SRC-CO, SRC-External plugin, CUDA,
+  ddp-transcribe (Development).
 
-## Step E — Access
+### Currently declared component parameters
 
-- **Allowed collaborations:** explicit whitelist (the owner CO; add others only
-  as needed). Do **not** use "on request" unless you want catalog-wide visibility.
+Ten parameters declared on the component today, all Source type `Fixed`
+(Overwritable ✓) unless noted. Portal is authoritative over any prior doc
+draft — in particular `model_small`'s default is `true`, not `false`.
 
-## Step F — Cloud settings
-
-- **Provider:** SURF HPC Cloud
-- **OS:** Ubuntu **24.04** (the `libclang-18-dev` pin is 24.04-specific — do not
-  offer 22.04)
-- **Flavours** (offer the subset you want selectable):
-  - one CPU flavour with high core count (faster cargo build) — e.g. 16 Core - 64 GB
-  - **1×A10** GPU flavour
-  - **2×A10** GPU flavour (if available — see decisions above)
-- **Boot disk: ~50 GB — do NOT leave it at the 15 GB default.** The provision
-  peak (CUDA toolkit ~5 GB + packages + Rust + the cargo `target/` during the
-  CUDA build) hits ~20–25 GB before `cargo clean`; 15 GB risks an `ENOSPC` build
-  failure. Models/transcripts live on the storage volume, so steady state is
-  ~12–15 GB. Go 80–100 GB only if the pipeline retains audio on the boot disk
-  rather than `~/scratch`. This supersedes the `CARGO_TARGET_DIR=~/scratch`
-  fallback (R2) — a bigger disk removes the cliff with no moving parts.
-
-## Step G — Parameters (Step 6)
-
-Wiring per the component README. Action column: Keep / Overwrite /
-Make-interactive. **Only Make-interactive prompts the workspace creator** — both
-Keep (component default) and Overwrite (catalog-item value) are fixed at provision
-and invisible to the user. Make-interactive requires the parameter to be
-Overwritable at the component (all ten are). Litmus test: make it interactive
-only if the value depends on facts known at launch in that specific workspace.
-
-**Make-interactive demands a Label and a Default** (SRC requires a default even
-for interactive fields). For `storage_path` and `pipeline_user` there is no
-correct fixed default, so use a **placeholder template** the creator overwrites
-— it documents the format and, being non-existent, makes preflight fail loudly
-if left unedited (better than a wrong-but-valid path):
-
-- `storage_path` — Label `Storage volume mount path`; Default
-  `/home/<username>/data/<volume-name>`; Description: mount point of the volume
-  attached to this workspace (SRC mounts it at `/home/<user>/data/<volume-name>`).
-- `pipeline_user` — Label `Workspace user`; Default `<your-src-username>`.
-- the three `model_*` flags use genuine `true`/`false` defaults (pre-set the checkboxes).
-
-| Parameter | Source | Action | Value |
+| Parameter | Action at item | Default | Notes |
 |---|---|---|---|
-| `storage_path` | ddp-transcribe | **Make interactive** | creator supplies the mounted volume path, e.g. `/home/<user>/data/<volume>` |
-| `pipeline_user` | ddp-transcribe | **Make interactive** | the workspace user (their SRC username) |
-| `model_large_v3_turbo` | ddp-transcribe | **Make interactive** | checkbox; default true |
-| `model_tiny_en` | ddp-transcribe | **Make interactive** | checkbox; default false |
-| `model_small` | ddp-transcribe | **Make interactive** | checkbox; default false |
-| `pipeline_git_ref` | ddp-transcribe | Keep | `v0.2.0-rc1` until promoted to `v0.2.0` |
-| `download_workers` | ddp-transcribe | Keep | `3` |
-| `compute_lang_probs` | ddp-transcribe | Keep | `false` |
-| `run_smoke_test` | ddp-transcribe | Keep | `false` (operator smokes by hand post-provision) |
-| `force_cpu_build` | ddp-transcribe | Keep | `false` |
-| `co_passwordless_sudo` | SRC-CO | **Overwrite** | `true` |
-| `timeout` | SRC-External plugin | **Overwrite** | `7200` — see note below |
-| `remote_ansible_version` | SRC-External plugin | Keep | `9.1.0` (the verified version) |
+| `compute_lang_probs` | Interactive | `false` | per-language probability pass, ~1.5–2× slower |
+| `download_workers` | Keep | `3` | parallel video-download workers |
+| `force_cpu_build` | Keep | `false` | debug aid; bypasses GPU-without-driver hard-fail |
+| `model_large_v3_turbo` | Interactive | `true` | ~573 MB, recommended production model |
+| `model_small` | Interactive | **`true`** | ~466 MB multilingual fallback — portal is authoritative here, not `false` |
+| `model_tiny_en` | Interactive | `false` | ~75 MB, English-only, smoke-test speed |
+| `pipeline_git_ref` | Keep | `v0.2.0-rc1` | pipeline repo tag (two version pins — see §2) |
+| `pipeline_user` | Interactive | placeholder `<username-fill-me-in>` | workspace account owning the run layout |
+| `run_smoke_test` | Keep | `false` | init+ingest against a bundled fixture at provision |
+| `storage_path` | Interactive | placeholder `/home/<username>/data/<volume-name>` | mount point of the attached storage volume |
 
-**All other upstream parameters: Keep value** — the defaults are correct for us.
-SRC-OS (`add_ips_to_hosts` false, `os_disk_format` true, `volume_mount_no_name`
-false — the last is why the external volume mounts at `…/data/<volume-name>`);
-SRC-CO (`co_admin_user_only`/`co_owner_user_only` false, `co_roles_enabled` true,
-`co_totp` true); SRC-External plugin (`disable_log` false — keep the provisioning
-log). Only the two **Overwrite** rows above and the `co_passwordless_sudo` flip
-differ from upstream defaults. `co_research_drive` (true) installs WebDAV mount
-scripts — harmless; our storage is a block volume, so set false only if you want
-a leaner box and will never use Research Drive.
+## 2. The delta to push (this remake)
 
-> **timeout:** the default 3600 s may be too tight for a *cold* provision — the
-> `cargo build --release --features cuda` of whisper-rs compiles CUDA kernels via
-> nvcc (the long pole), on top of the ~5 GB toolkit install and the ~573 MB model
-> download. Set 7200 for the first validation and tune down once the cold
-> wallclock is measured (record it below).
+The playbook already carries the full three-backend surface
+(`storage_backend`, `yoda_*`, tiered-mode internals — see
+`docs/superpowers/specs/2026-07-28-catalog-item-remake-design.md` §2–3). The
+portal component does not yet declare the Yoda parameters — undeclared params
+have no effect (S8) — so this is a **component edit** (never a recreate — S7)
+on the existing Development version.
 
-## Step H — Workspace settings
+> **Two version pins, don't confuse them:** the component's **Tag** (Step 1 of
+> the "Add component" wizard) pins the *component repo* (`main`); the
+> `pipeline_git_ref` parameter pins the *pipeline repo*
+> (`v0.2.0-rc1`). A provisioning-only fix changes the component (re-clone
+> `main`, re-run); a pipeline release changes `pipeline_git_ref` (rebuild).
+> This distinction matters most when editing the component (below): don't
+> confuse re-tagging the component repo with bumping the pipeline ref.
 
-- **Access button:** Command line (SSH)
-- **Firewall:** inbound TCP **22** only; all outbound open (GitHub, NVIDIA repo,
-  HuggingFace, crates.io, TikTok CDNs). Leave "allow owner to change security
-  groups" unchecked to lock the firewall.
+> **Co-Secret `$`-interpolation quirk (S3):** a literal `$` in the Yoda data-access
+> password can be eaten by a shell/compose interpolation layer before it reaches
+> `gocmd`. If auth only fails via automation (not when pasted by hand), regenerate
+> the DAP until it contains no `$`, or verify independently that `$` survives to
+> `gocmd` in this environment. Relevant here because the `yoda_data_access_password`
+> Co-Secret is one of the six declarations this component edit adds (below).
 
-| From | To | IP | Direction | Protocol | Mutable |
-|---|---|---|---|---|---|
-| 22 | 22 | 0.0.0.0/0 | in | tcp | No |
+> **Edit, never recreate (S7).** Recreating the component orphans the item's
+> reference to the old development version and every declared param vanishes
+> from the item. Always **edit** `ddp-transcribe` in place.
 
-## Tier 5 — validation pass (after Submit)
+> **Undeclared params silently do nothing (S8).** SRC only passes params
+> explicitly declared on the component to the playbook. A param set at the
+> item with no matching component declaration has zero effect — no error,
+> just silence. This is exactly the bug this remake fixes for the yoda surface.
 
-0. **Create the storage volume first** (it is a separate object, *not* part of
-   this catalog item): SRC portal → CREATE NEW → storage card → SURF HPC Cloud
-   volume → same CO as the workspace → size generously (models + 65k transcripts;
-   more if audio is retained) → name it (e.g. `ddp-transcribe-<study>`).
-1. Launch a workspace on **1×A10**. The **second-to-last wizard step is "Attach
-   the storage volume"** — attach the volume from step 0; SRC-OS mounts it at
-   `~/data/<volume-name>`. Supply the interactive params: `storage_path` =
-   `/home/<pipeline_user>/data/<volume-name>`, `pipeline_user` = your SRC
-   username; check the model boxes you want.
-2. Watch the deployment log to green — **no manual SSH fixes allowed** (that's
-   the whole point of the catalog item).
-3. SSH in and verify the ADR 0032 layout: `ddp-transcribe --help`; `ldd $(which
-   ddp-transcribe) | grep libcudart`; `ls ~/ddp-work/models/` (models on the boot
-   disk); `ls ~/run-pipeline-gpu0.sh ~/sync-to-storage.sh ~/restore-from-storage.sh
-   ~/ddp-state/`.
-4. Operator smoke: drop a fixture DDP JSON into `<storage>/inbox`,
-   `~/run-pipeline-gpu0.sh init`, `… ingest`, `… process --max-videos 3`,
-   inspect a transcript artifact (under `~/ddp-work/transcripts/<NN>/`) with `jq`,
-   then confirm the auto-sync landed it on the volume (`ls <storage>/transcripts/<NN>/`
-   and `<storage>/state-snapshot.sqlite`).
-5. Relaunch on **2×A10**: confirm both `~/run-pipeline-gpu0.sh` and
-   `-gpu1.sh` exist; run both concurrently; `nvidia-smi` shows load on both GPUs.
-   **First real test of two-process claim contention (R11)** — watch for stale
-   `processing` rows / double-claims in the shared state DB.
-6. Pause/resume the workspace; confirm the run layout survives.
-7. Promote component **development → pilot → live**; once live, tag the pipeline
-   repo **`v0.2.0`** and bump `pipeline_git_ref` to it (overwrite stays in the item).
+### New component declarations (six), all Overwritable ✓
 
----
+Copied verbatim from spec §4:
 
-## Item record (fill in once live)
+| Parameter | Source type | Default | Description (short) |
+|---|---|---|---|
+| `storage_backend` | Fixed | `src-volume` | `src-volume` \| `yoda` \| `research-drive` (reserved) |
+| `yoda_collection` | Fixed | *(blank)* | iRODS collection base path, e.g. `/nluu10p/home/research-foo` |
+| `yoda_user` | Fixed | *(blank)* | Yoda username, e.g. `user@uu.nl` |
+| `yoda_host` | Fixed | `fsw.data.uu.nl` | iRODS host (UU default) |
+| `yoda_zone` | Fixed | `nluu10p` | iRODS zone (UU default) |
+| `yoda_data_access_password` | **Co-Secret** | *(secret)* | Yoda DAP; resolved from the **launching** CO's Secrets tab |
 
-- **Catalog item name:** DDP Transcribe
-- **Owner CO:** _(TBD — PERMANENT)_
-- **Component:** ddp-transcribe (`d3i-infra/researchcloud-ddp-transcribe`,
-  `deploy-ddp-transcribe.yaml`), visibility restricted to owner CO
-- **Allowed COs:** _(TBD)_
-- **Flavours offered:** _(record exact names)_
+### Existing-param updates
 
-### Validation log
+- **`storage_path` description** becomes backend-aware: for mount backends
+  (`src-volume` / `research-drive`) it's the durable sink; for `yoda` it's an
+  **optional interim fast tier** — a blank/unedited value means direct-to-Yoda
+  (plain mode), a real mounted path activates **tiered mode** (see §4 and the
+  design spec §2–3).
+- **`download_workers`** flips from Keep to **Interactive** at the item (D11)
+  — likely the campaign bottleneck (S16), so it needs to be tunable per-launch
+  rather than fixed at `3`.
 
-_(workspace names, flavour, cold provision wallclock, boot-disk high-water
-`df -h`, smoke results, 2-GPU concurrent run outcome, R11 observations)_
+### Item wiring (new params)
+
+- `storage_backend`, `yoda_collection`, `yoda_user` → **Make interactive**
+  with loud, non-existent placeholder defaults (so an unedited field fails
+  preflight loudly — S9 — rather than silently doing the wrong thing).
+- `yoda_host`, `yoda_zone` → **Keep** (UU defaults are correct).
+- `yoda_data_access_password` (Co-Secret) needs no item wiring, but the secret
+  itself must exist on the **launching** CO before provisioning (§3).
+
+### Doc reconciliation (D10)
+
+This doc now matches the portal for `model_small` (default `true`,
+Interactive) and `compute_lang_probs` (Interactive) — the previous draft of
+this doc had both wrong.
+
+## 3. Pre-launch CO setup
+
+Do this on the CO the workspace will actually be **launched** in — for the 3M
+campaign, "perceptions of crime policing - UU". The Co-Secret resolves from
+the launching CO, not the owner CO, and not any other CO the item is shared
+with (S1).
+
+1. **Generate a fresh Yoda data-access password (DAP)** — Yoda web portal →
+   Data Transfer. Generate it **immediately before** provisioning; never reuse
+   a DAP that has already failed once (S2 — failed-attempt bursts permanently
+   invalidate a DAP). Check the generated string for a literal `$` (S3 above);
+   regenerate if present, or confirm separately that it will survive to
+   `gocmd`.
+2. **Create the `yoda_data_access_password` Co-Secret** on that CO's Secrets
+   tab with the fresh DAP.
+3. **Create the SRC volume** in the same CO: SRC portal → CREATE NEW →
+   storage card → SURF HPC Cloud volume → same CO as the workspace → name it
+   (e.g. `ddp-transcribe-<study>`).
+   - **Size generously and check growability first** (S11): the volume holds
+     accumulating transcripts + inbox + state snapshots with no pruning across
+     a 35–70-day campaign. If the volume type isn't growable in place,
+     oversize at creation rather than planning a mid-campaign resize.
+4. **Note the DAP renewal calendar date** (~day 28 of the campaign): the Yoda
+   PAM token TTL (`yoda_auth_ttl_hours: 720`, i.e. 30 days) is shorter than the
+   campaign, and the DAP is deliberately never written to disk, so renewal is
+   a documented manual step, not automatic (S4).
+
+## 4. Launch runbook (3M campaign = Tier-5 validation)
+
+The 3M-video campaign machine is the deliverable; this remade item is its
+vehicle, and launching it is simultaneously this remake's Tier-5 validation.
+Steps 4–7 below are spec §6 verbatim; the checklist in the middle is spec §7.
+
+**4. Flavour availability check** — confirm A10-2GPU schedules that day before
+committing to the launch window (2026-07-13 saw a provider-side outage on this
+flavour); fallback is 1×A10 (doubles wallclock, unblocks if 2×A10 is
+unavailable).
+
+**5. Launch = Tier-5 validation** — 2×A10, `storage_backend=yoda`, interactive
+values for `yoda_collection` / `yoda_user` / `storage_path` /
+`download_workers`, volume attached at the second-to-last wizard step
+("Attach the storage volume").
+
+**6. Validation checklist** (run on the launched machine before the campaign
+starts):
+
+- Deployment log green, **zero manual SSH fixes**.
+- `ddp-transcribe --help`; `ldd $(which ddp-transcribe) | grep libcudart`.
+- Both `~/run-pipeline-gpu0.sh` and `-gpu1.sh` exist; `~/push-to-yoda.sh`,
+  `~/pull-from-yoda.sh`, `~/sync-to-storage.sh`, `~/restore-from-storage.sh`,
+  `~/ddp-state/` all present.
+- **Tiered round-trip smoke:** `pull-from-yoda.sh` seeds the volume → `restore-from-storage.sh`
+  hydrates boot → process a handful of videos → hop 1 (`sync-to-storage.sh`,
+  automatic at batch end) lands transcripts + snapshot on the volume → hop 2
+  (`push-to-yoda.sh`, operator-run) lands the shard tar + server-side
+  extracted tree on Yoda (verify in the portal / via `gocmd`).
+- Both GPUs processing concurrently — **first real R11 claim-contention
+  test**: watch the shared state DB for stale `processing` rows or
+  double-claims (S12).
+- Pause/resume the workspace; confirm the run layout and tokens survive.
+- **Record:** cold provision wallclock, boot-disk high-water `df -h`,
+  per-video rates, hop-1/hop-2 wallclocks — into §6 below.
+
+**7. Campaign start**, then promote the component **Development → Live** and
+fill in the item record + validation log in this doc.
+
+> **Launch gate:** the 3M campaign run waits on a pending update to
+> `daniellemccool/ddp-transcribe` (the pipeline repo). Once its tag is cut,
+> the item's `pipeline_git_ref` overwrite gets updated to it — until then, the
+> launch uses `v0.2.0-rc1` as declared above.
+
+## 5. Snag list (deploy-time debugging playbook)
+
+This doc is the long-term home for this table — keep it current as new snags
+surface.
+
+| # | Snag | Symptom → cause → fix |
+|---|---|---|
+| S1 | Co-Secret missing on launching CO | gocmd init fails/empty password at provision → secret created on wrong CO (it resolves from the **launching** CO) → create it on the campaign CO's Secrets tab; preflight assert names this |
+| S2 | DAP burned by failed attempts | auth keeps failing with the "right" password → failed-attempt bursts permanently invalidate a DAP → regenerate fresh; never retry a failed one |
+| S3 | `$` in the DAP | auth fails only via automation → interpolation layer eats `$` → regenerate until no `$` (or verify it survives to gocmd) |
+| S4 | **PAM token expiry mid-campaign** | hop-2 pushes start failing ~day 30 → `yoda_auth_ttl_hours: 720` < 35–70-day campaign and the DAP is (deliberately) not on disk → documented renewal: fresh DAP + re-run `gocmd init` on the box; calendar ~day 28 |
+| S5 | A10 capacity/provider outage | launch/resume fails (seen 2026-07-13) → provider-side → check same-day schedulability first; 1×A10 fallback doubles wallclock but unblocks |
+| S6 | CUDA floats with NVIDIA latest | whisper-rs build breaks on a future release → SRC CUDA component installs NVIDIA current → force our pinned 13.2 toolkit (install even when nvcc present) |
+| S7 | Component recreated instead of edited | params vanish from the item → new component ≠ referenced development version → always **edit** the existing component |
+| S8 | Undeclared param silently absent | value set at item has no effect → SRC only passes declared params → declare at the component first (that's this remake) |
+| S9 | Placeholder default left unedited | preflight fails loudly on `<username-fill-me-in>`-style paths → by design; fill the interactive fields |
+| S10 | Volume/`storage_path` mismatch | tiered preflight assert fails → path must be exactly `/home/<pipeline_user>/data/<volume-name>` (`volume_mount_no_name=false`) → fix the interactive value |
+| S11 | Undersized volume mid-campaign | volume fills ~week N → transcripts accumulate, no pruning → size generously at creation; check growability beforehand |
+| S12 | R11 two-GPU claim contention | stale `processing` rows / double-claims → first real concurrent test → validation step watches the state DB; pipeline-repo issue if seen |
+| S13 | First hop-2 push at scale | `bun -x` timeout / server saturation → huge first delta → `YODA_BUN_TIMEOUT` generous (≥1200 s), `YODA_THREADS ≤ 15` (30 saturated the server 2026-07-06) |
+| S14 | Boot-disk watermark | `ENOSPC` late in campaign → ~3M transcripts ≈ 30–40 GB + models + toolkit on 100 GB → fine but monitor `df -h`; escalate to pruning design only if real |
+| S15 | 80/443 open, nothing listens | scanner/reviewer alarm → immutable item rules, no service bound → expected; do not "fix" |
+| S16 | `download_workers` pacing | GPUs idle, inbox starving / TikTok rate-limits → downloader is the campaign bottleneck → set per-launch (now Interactive), tune from observed throughput |
+
+## 6. Validation log
+
+_(fill in at launch)_
+
+- **Workspace name:**
+- **Flavour:**
+- **Cold provision wallclock:**
+- **Boot-disk high-water (`df -h`):**
+- **Per-video rates:**
+- **Hop-1 wallclock (sync-to-storage.sh):**
+- **Hop-2 wallclock (push-to-yoda.sh):**
+- **R11 observations (two-GPU claim contention):**

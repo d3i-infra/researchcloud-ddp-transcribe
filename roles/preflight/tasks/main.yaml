@@ -18,6 +18,16 @@
       or use the yoda backend. Tracking: docs/FOLLOWUPS.md.
   when: storage_backend == 'research-drive'
 
+- name: Determine tiered storage mode (yoda backend + interim SRC volume)
+  ansible.builtin.set_fact:
+    # Tiered when yoda AND a real storage_path was supplied. An unedited
+    # portal placeholder (contains '<') counts as unset: the interactive
+    # storage_path field always arrives, even on volume-less yoda launches.
+    tiered_storage: >-
+      {{ storage_backend == 'yoda'
+         and (storage_path | default('') | length > 0)
+         and ('<' not in (storage_path | default(''))) }}
+
 - name: Require pipeline_user parameter
   ansible.builtin.assert:
     that:
@@ -45,7 +55,10 @@
       - yoda_data_access_password | default('') | length > 0
     fail_msg: >-
       The yoda backend requires yoda_collection (iRODS collection base path),
-      yoda_user (Yoda username), and yoda_data_access_password (Co-Secret).
+      yoda_user (Yoda username), and yoda_data_access_password. The password
+      arrives as a Co-Secret resolved from the CO the workspace is LAUNCHED
+      in — create the secret on that CO's Secrets tab (not another CO's) with
+      a freshly generated data-access password.
   no_log: true
   when: storage_backend == 'yoda'
 
@@ -77,18 +90,19 @@
     # a CO group (e.g. rsc_co_NNNNNN) with no per-user group.
     pipeline_group: "{{ getent_passwd[pipeline_user][2] }}"
 
-- name: Check storage_path exists (mount backends only)
+- name: Check storage_path exists (mount backends + tiered yoda)
   ansible.builtin.stat:
     path: "{{ storage_path }}"
   register: storage_stat
-  when: storage_backend != 'yoda'
+  when: storage_backend != 'yoda' or tiered_storage | bool
 
-- name: Fail if storage_path is not a directory (mount backends only)
+- name: Fail if storage_path is not a directory (mount backends + tiered yoda)
   ansible.builtin.fail:
     msg: >-
       storage_path '{{ storage_path }}' does not exist or is not a directory.
       Attach an external storage volume to the workspace and pass its mount
-      point (typically /home/<user>/data/<volume-name>).
+      point (typically /home/<user>/data/<volume-name>). For the yoda backend
+      this activates tiered mode; there is NO silent boot-disk fallback.
   when:
-    - storage_backend != 'yoda'
+    - storage_backend != 'yoda' or tiered_storage | bool
     - not storage_stat.stat.exists or not storage_stat.stat.isdir

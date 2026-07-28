@@ -10,6 +10,11 @@
 {% if storage_backend == 'yoda' %}
 # Inbox is pulled from the Yoda collection to {{ work_dir }}/inbox by
 # ~/restore-from-storage.sh (no mount to read in place) — run it before ingest.
+{% if tiered_storage | bool %}
+# Tiered mode: seed/refresh the interim volume first with ~/pull-from-yoda.sh;
+# batch-end syncs go boot -> volume (fast); ~/push-to-yoda.sh sends volume ->
+# Yoda (slow, ~daily).
+{% endif %}
 {% else %}
 # Drop DDP watch-history JSONs into {{ storage_path }}/inbox before ingest.
 {% endif %}

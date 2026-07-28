@@ -46,7 +46,7 @@ window. A rebuilt workspace resumes a batch via `~/restore-from-storage.sh`.
 
 | Parameter | Default | Catalog action | Meaning |
 |---|---|---|---|
-| `storage_path` | *(required for mount backends)* | interactive | Mount point of the attached storage volume, e.g. `/home/<user>/data/<volume>`. Required for `src-volume`; unused for `yoda` |
+| `storage_path` | *(required for mount backends)* | interactive | Mount point of the attached storage volume, e.g. `/home/<user>/data/<volume>`. Mount backends (`src-volume`/`research-drive`): the durable sink, required. `yoda`: optional interim fast tier — blank (or an unedited placeholder) goes direct to Yoda; a real mount point activates tiered mode |
 | `pipeline_user` | *(required)* | interactive | Workspace user that owns run scripts, source tree, and state dir |
 | `storage_backend` | `src-volume` | interactive | Durable backend: `src-volume` (mount, rsync), `yoda` (iRODS via GoCommands), `research-drive` (reserved) |
 | `yoda_collection` | *(yoda only)* | interactive | iRODS collection base, e.g. `/nluu10p/home/research-foo` |
@@ -81,6 +81,14 @@ The transcription hot path is always the boot disk; only the durable side differ
   `~/ddp-work/inbox` and the run scripts read `--inbox` from there.
 - **`research-drive`** — reserved; `preflight` hard-fails with guidance until the
   WebDAV mount is wired (see `docs/FOLLOWUPS.md`).
+
+**Tiered mode** activates when `storage_backend: yoda` **and** `storage_path`
+is a real (non-blank, non-placeholder) mount point: an SRC volume then sits
+between the boot disk and Yoda as a fast interim tier for campaign scale.
+`sync-to-storage.sh` (hop 1, automatic at every batch end) syncs boot disk →
+volume; `push-to-yoda.sh` (hop 2, operator-driven, ~daily) pushes volume →
+Yoda via shard tars + server-side extraction. See `docs/storage-backends.md`
+for the full diagram, script list, and the DDP Inspector data-plane contract.
 
 **Delivering transcripts to a researcher's Yoda from a dev machine** reuses the
 same script — no SRC needed:

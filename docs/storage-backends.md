@@ -82,3 +82,88 @@ and per-file portal browsing; `YODA_EXTRACT=0` gives archive-only, and
 (≤ ~10k files). Full measurements and the extraction/ticket verification
 log: `yoda-operations.md`. Design:
 `docs/superpowers/specs/2026-07-10-yoda-shard-tar-delivery-design.md`.
+
+## Tiered mode (yoda + interim volume)
+
+For a campaign at 1M+ videos, an SRC volume sits between the boot disk and
+Yoda as a fast interim tier — Yoda stays the inbox origin and the durable
+final sink, but hop 2 (below) runs at operator cadence instead of every batch:
+
+```
+HOT (boot disk)                INTERIM (SRC volume)              DURABLE (Yoda)
+~/ddp-work/{inbox,transcripts} <storage_path>/{inbox,transcripts, yoda_collection/{inbox,
+~/ddp-state/state.sqlite        state-snapshot.sqlite}            transcripts-tars/, transcripts/,
+                                                                  state-snapshot.sqlite}
+
+── hop 1: fast, AUTOMATIC, end of every batch ──►
+   sync-to-storage.sh — rsync transcripts + sqlite .backup snapshot → volume
+   (today's mount-backend branch, verbatim; no gocmd in the hot path)
+
+                               ── hop 2: slow, OPERATOR-DRIVEN (~daily) ──►
+                                  push-to-yoda.sh — shard-tar build + gocmd push
+                                  + server-side extract, sourced from the VOLUME
+                                  (yoda-sync.sh unchanged; env points at
+                                   <storage_path>/transcripts + snapshot)
+
+◄── restore: fast, volume → boot ──  ◄── seed once / refresh: yoda → volume ──
+   restore-from-storage.sh              pull-from-yoda.sh (inbox + resume state)
+```
+
+**Activation:** tiered mode is `storage_backend: yoda` **and** a non-blank
+`storage_path` — plain `yoda` (blank `storage_path`) and `src-volume` behavior
+are both unchanged. An unedited placeholder value in `storage_path` (still
+containing `<`, e.g. `<volume-mount-path>`) counts as unset, so a volume-less
+yoda launch doesn't accidentally trip tiered mode.
+
+**Scripts:**
+
+- `sync-to-storage.sh` (hop 1) — fast rsync + `.backup` snapshot, boot disk →
+  volume, run automatically at the end of every batch (both GPUs serialize
+  through the existing flock).
+- `push-to-yoda.sh` (hop 2) — shard-tar build + `gocmd` push + server-side
+  extraction, sourced from the volume; operator-driven, ~daily. Takes the sync
+  lock only to capture a stable copy of the state snapshot, then pushes
+  lock-free — a slow push never blocks a batch-end sync.
+- `pull-from-yoda.sh` — seeds or refreshes the volume's inbox from Yoda (and,
+  on a fresh volume with no `state-snapshot.sqlite`, prior transcripts + resume
+  state too). Run once before the first batch, and again to pick up newly
+  arrived donor DDPs.
+- `restore-from-storage.sh` — volume → boot, including inbox hydration. On a
+  rebuilt workspace: if the volume itself is empty (no state snapshot **and**
+  an empty inbox), it fails loudly with instructions to run
+  `pull-from-yoda.sh` first, rather than silently starting a fresh batch.
+
+**Order on a rebuilt workspace:** volume first — `pull-from-yoda.sh` only if
+the volume is fresh/empty, then `restore-from-storage.sh`.
+
+**Durability:** losing the volume costs only the delta since the last hop-2
+push — everything before that is already on Yoda, and ADR 0008 (pipeline
+repo) makes re-attempts idempotent, so a restart never double-processes.
+State DB never leaves the boot disk; only its `.backup` snapshots travel.
+
+## Data-plane contract (DDP Inspector interop)
+
+The DDP Inspector is a **separate catalog item**, on its own workspace; an SRC
+volume attaches to one workspace only, so Yoda is the shared data plane
+between this component and the inspector. This component never serves web
+traffic and stays SSH-only — interop is entirely through what it guarantees
+lives under `yoda_collection`:
+
+- `inbox/` — donor DDP JSONs.
+- `transcripts/` — server-side-extracted sharded tree, `NN/<id>.txt|.json`
+  (ADR 0004 sharding) — exactly the inspector's expected `transcripts_dir`
+  layout.
+- `transcripts-tars/` — the byte-reproducible per-shard archives.
+- `state-snapshot.sqlite` — the latest pushed state snapshot.
+- No hidden files (shard-tar staging excludes dotfiles at tar time).
+
+**Freshness:** the Yoda tree lags the running pipeline by the hop-2 cadence
+(~daily, operator-driven — not automatic, not cron'd). The inspector's
+"not transcribed yet" state is expected to cover that gap.
+
+**Access:** an anonymous read ticket (`gocmd mkticket -t read` on the
+collection) — read-only, no DAP, no CO membership required on the inspector
+side (verified 2026-07-13). Hygiene: set an expiry with `modticket` on any
+real hand-off (defaults are permissive — unlimited uses, no expiry);
+`rmticket` revokes; `lsticket` audits. See `yoda-operations.md` for the full
+verification log.
