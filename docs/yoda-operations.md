@@ -56,6 +56,28 @@ repeatedly:
   "Authentication failed" after a ~2 s PAM delay — the two failure shapes are
   distinguishable with `gocmd -d`.
 
+## Mid-campaign token renewal (S4)
+
+`yoda_auth_ttl_hours: 720` (the 30-day PAM token, see above) is comfortably
+**shorter** than a 35–70-day campaign, and the data-access password is
+deliberately never stored on the workspace (it lives only in the CO Secret at
+provision time). Renewal is therefore a **manual, calendared** step, not
+something the role retries on its own:
+
+1. Generate a **fresh** DAP in the Yoda web portal (Data Transfer). Same rule
+   as at provisioning: never retry a DAP that has already failed (S2) —
+   regenerate instead.
+2. On the workspace, run `gocmd init` by hand and paste the fresh DAP when
+   prompted. (The role's own stale-token probe pattern — no valid token found
+   → re-init — also fires on the *next* provision/re-run, but that doesn't
+   help mid-campaign on an already-running workspace; this step is the
+   operator doing the same thing manually.)
+3. Verify with `gocmd ls i:<collection>` — judge success by exit code /
+   listing output, never by `.irodsA` existing (see above).
+
+**Calendar this ~day 28** of the campaign, a couple of days ahead of expiry,
+so a renewal never lands after hop-2 pushes have already started failing.
+
 ## Performance envelope — measured 2026-07-06 and 2026-07-13
 
 Treat these as the **normal baseline**, not an incident (confirmed by the
