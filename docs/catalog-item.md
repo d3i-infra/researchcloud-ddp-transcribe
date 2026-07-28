@@ -86,7 +86,13 @@ on the existing Development version.
 > item with no matching component declaration has zero effect — no error,
 > just silence. This is exactly the bug this remake fixes for the yoda surface.
 
-### New component declarations (six), all Overwritable ✓
+### New component declarations (six)
+
+The five Fixed params are **Overwritable ✓** (needed for the item's
+Make-interactive/Overwrite wiring). `yoda_data_access_password` is
+**Overwritable ✗ (unchecked)** — the Co-Secret must only ever resolve from
+the launching CO's Secrets tab; overwritable would permit an item-level
+literal or an interactive password prompt, both wrong for a secret.
 
 Copied verbatim from spec §4:
 
@@ -97,7 +103,15 @@ Copied verbatim from spec §4:
 | `yoda_user` | Fixed | *(blank)* | Yoda username, e.g. `user@uu.nl` |
 | `yoda_host` | Fixed | `fsw.data.uu.nl` | iRODS host (UU default) |
 | `yoda_zone` | Fixed | `nluu10p` | iRODS zone (UU default) |
-| `yoda_data_access_password` | **Co-Secret** | *(secret)* | Yoda DAP; resolved from the **launching** CO's Secrets tab |
+| `yoda_data_access_password` | **Co-Secret** | `{"key": "yoda_data_access_password", "sensitive": 1}` | Yoda DAP; resolved from the **launching** CO's Secrets tab |
+
+> **Co-Secret declaration format:** the Default value field of a Co-Secret
+> parameter takes a JSON object, not a bare key name:
+> `{"key": "<secret name on the CO Secrets tab>", "sensitive": 1}`.
+> `sensitive: 1` (the default) keeps the value out of provisioning logs — do
+> not set 0 for a password. The `key` string must exactly match the secret's
+> name on the **launching** CO's Secrets tab or the lookup silently resolves
+> nothing (preflight then fails with the S1 message).
 
 ### Existing-param updates
 
@@ -139,14 +153,18 @@ with (S1).
    regenerate if present, or confirm separately that it will survive to
    `gocmd`.
 2. **Create the `yoda_data_access_password` Co-Secret** on that CO's Secrets
-   tab with the fresh DAP.
+   tab with the fresh DAP. The secret's name must be exactly
+   `yoda_data_access_password` — it must match the `key` in the component's
+   Co-Secret declaration JSON (see §2).
 3. **Create the SRC volume** in the same CO: SRC portal → CREATE NEW →
    storage card → SURF HPC Cloud volume → same CO as the workspace → name it
    (e.g. `ddp-transcribe-<study>`).
    - **Size generously and check growability first** (S11): the volume holds
      accumulating transcripts + inbox + state snapshots with no pruning across
-     a 35–70-day campaign. If the volume type isn't growable in place,
-     oversize at creation rather than planning a mid-campaign resize.
+     a 35–70-day campaign; budget ~2× the transcript tree — hop 2 stages shard
+     tars (`transcripts-tars/`) on the volume alongside the extracted files
+     (S11). If the volume type isn't growable in place, oversize at creation
+     rather than planning a mid-campaign resize.
 4. **Note the DAP renewal calendar date** (~day 28 of the campaign): the Yoda
    PAM token TTL (`yoda_auth_ttl_hours: 720`, i.e. 30 days) is shorter than the
    campaign, and the DAP is deliberately never written to disk, so renewal is

@@ -92,8 +92,8 @@ final sink, but hop 2 (below) runs at operator cadence instead of every batch:
 ```
 HOT (boot disk)                INTERIM (SRC volume)              DURABLE (Yoda)
 ~/ddp-work/{inbox,transcripts} <storage_path>/{inbox,transcripts, yoda_collection/{inbox,
-~/ddp-state/state.sqlite        state-snapshot.sqlite}            transcripts-tars/, transcripts/,
-                                                                  state-snapshot.sqlite}
+~/ddp-state/state.sqlite        transcripts-tars/,                transcripts-tars/, transcripts/,
+                                state-snapshot.sqlite}            state-snapshot.sqlite}
 
 ── hop 1: fast, AUTOMATIC, end of every batch ──►
    sync-to-storage.sh — rsync transcripts + sqlite .backup snapshot → volume
@@ -121,9 +121,13 @@ yoda launch doesn't accidentally trip tiered mode.
   volume, run automatically at the end of every batch (both GPUs serialize
   through the existing flock).
 - `push-to-yoda.sh` (hop 2) — shard-tar build + `gocmd` push + server-side
-  extraction, sourced from the volume; operator-driven, ~daily. Takes the sync
-  lock only to capture a stable copy of the state snapshot, then pushes
-  lock-free — a slow push never blocks a batch-end sync.
+  extraction, sourced from the volume; operator-driven, ~daily. Hop 2 stages
+  the shard tars on the volume itself (`<storage_path>/transcripts-tars/`, plus
+  a `.transcripts-tars-pushed.md5` manifest at the volume root) — a near-duplicate
+  of the transcript tree that persists between pushes, so size the volume for ~2×
+  the transcript tree. Takes the sync lock only to capture a stable copy of the
+  state snapshot, then pushes lock-free — a slow push never blocks a batch-end
+  sync.
 - `pull-from-yoda.sh` — seeds or refreshes the volume's inbox from Yoda (and,
   on a fresh volume with no `state-snapshot.sqlite`, prior transcripts + resume
   state too). Run once before the first batch, and again to pick up newly
