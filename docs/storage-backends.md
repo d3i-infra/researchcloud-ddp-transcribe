@@ -92,8 +92,8 @@ final sink, but hop 2 (below) runs at operator cadence instead of every batch:
 ```
 HOT (boot disk)                INTERIM (SRC volume)              DURABLE (Yoda)
 ~/ddp-work/{inbox,transcripts} <storage_path>/{inbox,transcripts, yoda_collection/{inbox,
-~/ddp-state/state.sqlite        state-snapshot.sqlite}            transcripts-tars/, transcripts/,
-                                                                  state-snapshot.sqlite}
+~/ddp-state/state.sqlite        transcripts-tars/,                transcripts-tars/, transcripts/,
+                                state-snapshot.sqlite}            state-snapshot.sqlite}
 
 ── hop 1: fast, AUTOMATIC, end of every batch ──►
    sync-to-storage.sh — rsync transcripts + sqlite .backup snapshot → volume
@@ -109,11 +109,15 @@ HOT (boot disk)                INTERIM (SRC volume)              DURABLE (Yoda)
    restore-from-storage.sh              pull-from-yoda.sh (inbox + resume state)
 ```
 
-**Activation:** tiered mode is `storage_backend: yoda` **and** a non-blank
-`storage_path` — plain `yoda` (blank `storage_path`) and `src-volume` behavior
-are both unchanged. An unedited placeholder value in `storage_path` (still
-containing `<`, e.g. `<volume-mount-path>`) counts as unset, so a volume-less
-yoda launch doesn't accidentally trip tiered mode.
+**Activation:** tiered mode is `storage_backend: yoda` **and** a resolved
+storage volume. Preflight resolves the volume automatically: SRC mounts
+attached volumes at `/home/<user>/data/<volume-name>`, and exactly one mount
+there is adopted with no parameter needed (multiple mounts fail loudly and
+ask for an explicit `storage_path`; an unedited `<...>` placeholder counts as
+unset). The resolved path lives in the `storage_root` fact — SRC parameters
+arrive as extra-vars, which `set_fact` cannot override, so the raw
+`storage_path` input and the resolved fact are deliberately distinct names.
+Plain `yoda` (no volume attached) and `src-volume` behavior are unchanged.
 
 **Scripts:**
 
@@ -121,9 +125,13 @@ yoda launch doesn't accidentally trip tiered mode.
   volume, run automatically at the end of every batch (both GPUs serialize
   through the existing flock).
 - `push-to-yoda.sh` (hop 2) — shard-tar build + `gocmd` push + server-side
-  extraction, sourced from the volume; operator-driven, ~daily. Takes the sync
-  lock only to capture a stable copy of the state snapshot, then pushes
-  lock-free — a slow push never blocks a batch-end sync.
+  extraction, sourced from the volume; operator-driven, ~daily. Hop 2 stages
+  the shard tars on the volume itself (`<storage_path>/transcripts-tars/`, plus
+  a `.transcripts-tars-pushed.md5` manifest at the volume root) — a near-duplicate
+  of the transcript tree that persists between pushes, so size the volume for ~2×
+  the transcript tree. Takes the sync lock only to capture a stable copy of the
+  state snapshot, then pushes lock-free — a slow push never blocks a batch-end
+  sync.
 - `pull-from-yoda.sh` — seeds or refreshes the volume's inbox from Yoda (and,
   on a fresh volume with no `state-snapshot.sqlite`, prior transcripts + resume
   state too). Run once before the first batch, and again to pick up newly

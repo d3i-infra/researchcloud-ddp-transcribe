@@ -16,7 +16,7 @@
 # Yoda (slow, ~daily).
 {% endif %}
 {% else %}
-# Drop DDP watch-history JSONs into {{ storage_path }}/inbox before ingest.
+# Drop DDP watch-history JSONs into {{ storage_root }}/inbox before ingest.
 {% endif %}
 # `process` exits 3 when zero videos were claimed (done/empty) — not an error.
 # Transcripts are written to the boot disk ({{ work_dir }}/transcripts) for
@@ -42,7 +42,7 @@ rc=0
 {% if storage_backend == 'yoda' %}
   --inbox "{{ work_dir }}/inbox" \
 {% else %}
-  --inbox "{{ storage_path }}/inbox" \
+  --inbox "{{ storage_root }}/inbox" \
 {% endif %}
   --transcripts "{{ work_dir }}/transcripts" \
   --whisper-model "{{ work_dir }}/models/{{ default_model }}" \

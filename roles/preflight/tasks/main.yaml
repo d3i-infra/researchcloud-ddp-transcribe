@@ -18,16 +18,6 @@
       or use the yoda backend. Tracking: docs/FOLLOWUPS.md.
   when: storage_backend == 'research-drive'
 
-- name: Determine tiered storage mode (yoda backend + interim SRC volume)
-  ansible.builtin.set_fact:
-    # Tiered when yoda AND a real storage_path was supplied. An unedited
-    # portal placeholder (contains '<') counts as unset: the interactive
-    # storage_path field always arrives, even on volume-less yoda launches.
-    tiered_storage: >-
-      {{ storage_backend == 'yoda'
-         and (storage_path | default('') | length > 0)
-         and ('<' not in (storage_path | default(''))) }}
-
 - name: Require pipeline_user parameter
   ansible.builtin.assert:
     that:
@@ -36,16 +26,6 @@
     fail_msg: >-
       Required parameter missing: pipeline_user (workspace user that owns the
       run layout) must be set.
-
-- name: Require storage_path for mount backends
-  ansible.builtin.assert:
-    that:
-      - storage_path is defined
-      - storage_path | length > 0
-    fail_msg: >-
-      Required parameter missing: storage_path (mount point of the attached
-      storage volume) must be set for the '{{ storage_backend }}' backend.
-  when: storage_backend != 'yoda'
 
 - name: Require Yoda parameters for the yoda backend
   ansible.builtin.assert:
@@ -90,19 +70,79 @@
     # a CO group (e.g. rsc_co_NNNNNN) with no per-user group.
     pipeline_group: "{{ getent_passwd[pipeline_user][2] }}"
 
-- name: Check storage_path exists (mount backends + tiered yoda)
+# --- Storage volume resolution -------------------------------------------
+# SRC passes parameters as extra-vars, which set_fact cannot override, so the
+# raw storage_path INPUT is resolved into the storage_root FACT that every
+# consumer (workspace_layout, generated scripts) uses. An unedited portal
+# placeholder (contains '<') counts as unset. When unset, auto-detect: SRC
+# mounts attached volumes at <home>/data/<volume-name>, so exactly one mount
+# there is unambiguous. storage_mounts_source / storage_data_root are
+# testability seams (defaults are the real mount table / real data dir).
+
+- name: Detect attached storage volumes (when storage_path is not set)
+  ansible.builtin.set_fact:
+    storage_candidates: >-
+      {{ (storage_mounts_source | default(ansible_mounts))
+         | map(attribute='mount')
+         | select('match',
+                  '^' ~ (storage_data_root | default(pipeline_home ~ '/data') | regex_escape) ~ '/[^/]+$')
+         | list }}
+  when: >-
+    (storage_path | default('') | length == 0)
+    or ('<' in storage_path | default(''))
+
+- name: Fail on ambiguous storage volume auto-detection
+  ansible.builtin.fail:
+    msg: >-
+      Multiple storage volumes are mounted under
+      {{ storage_data_root | default(pipeline_home ~ '/data') }}
+      ({{ storage_candidates | join(', ') }}) — set storage_path explicitly
+      to the one the pipeline should use (or detach the others).
+  when:
+    - storage_candidates is defined
+    - storage_candidates | length > 1
+
+- name: Resolve storage_root (explicit storage_path, else the detected volume)
+  ansible.builtin.set_fact:
+    storage_root: >-
+      {{ storage_path
+         if (storage_path | default('') | length > 0
+             and '<' not in storage_path)
+         else (storage_candidates | default([]) | first | default('')) }}
+
+- name: Require a storage volume for mount backends
+  ansible.builtin.assert:
+    that:
+      - storage_root | length > 0
+    fail_msg: >-
+      The '{{ storage_backend }}' backend needs a storage volume: none was
+      auto-detected under {{ storage_data_root | default(pipeline_home ~ '/data') }}
+      and no usable storage_path was supplied (a value containing '<' is
+      treated as an unedited placeholder, i.e. unset). Attach a volume at
+      launch (SRC mounts it at /home/<user>/data/<volume-name>), or set
+      storage_path to the exact absolute mount path.
+  when: storage_backend != 'yoda'
+
+- name: Determine tiered storage mode (yoda backend + interim SRC volume)
+  ansible.builtin.set_fact:
+    # Tiered when yoda AND a volume resolved (explicit or auto-detected).
+    # Volume-less yoda launches resolve storage_root to '' and stay plain.
+    tiered_storage: "{{ storage_backend == 'yoda' and storage_root | length > 0 }}"
+
+- name: Check storage_root exists (mount backends + tiered yoda)
   ansible.builtin.stat:
-    path: "{{ storage_path }}"
+    path: "{{ storage_root }}"
   register: storage_stat
   when: storage_backend != 'yoda' or tiered_storage | bool
 
-- name: Fail if storage_path is not a directory (mount backends + tiered yoda)
+- name: Fail if storage_root is not a directory (mount backends + tiered yoda)
   ansible.builtin.fail:
     msg: >-
-      storage_path '{{ storage_path }}' does not exist or is not a directory.
-      Attach an external storage volume to the workspace and pass its mount
-      point (typically /home/<user>/data/<volume-name>). For the yoda backend
-      this activates tiered mode; there is NO silent boot-disk fallback.
+      storage volume path '{{ storage_root }}' does not exist or is not a
+      directory. Attach an external storage volume to the workspace (SRC
+      mounts it at /home/<user>/data/<volume-name>) or fix storage_path. For
+      the yoda backend a resolved volume activates tiered mode; there is NO
+      silent boot-disk fallback.
   when:
     - storage_backend != 'yoda' or tiered_storage | bool
     - not storage_stat.stat.exists or not storage_stat.stat.isdir

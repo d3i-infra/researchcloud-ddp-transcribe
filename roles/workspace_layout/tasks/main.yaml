@@ -10,7 +10,7 @@
 
 - name: Create durable directories on the storage volume (seed + sink / interim tier)
   ansible.builtin.file:
-    path: "{{ storage_path }}/{{ item }}"
+    path: "{{ storage_root }}/{{ item }}"
     state: directory
     owner: "{{ pipeline_user }}"
     group: "{{ pipeline_group }}"

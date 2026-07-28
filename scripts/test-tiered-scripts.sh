@@ -65,7 +65,7 @@ render() { # render <template> <dest> [tiered]
   "${ANSIBLE}" localhost -c local -m ansible.builtin.template \
     -a "src=${TPL}/${tpl} dest=${dest} mode=0755" \
     -e "storage_backend=yoda" -e "tiered_storage=${tiered}" \
-    -e "storage_path=${VOL}" -e "yoda_collection=/coll" \
+    -e "storage_root=${VOL}" -e "yoda_collection=/coll" \
     -e "work_dir=${BOOT}/ddp-work" -e "state_dir=${BOOT}/ddp-state" \
     -e "pipeline_home=${PHOME}" -e "cuda_build=false" \
     -e "download_workers=3" -e "compute_lang_probs=false" \

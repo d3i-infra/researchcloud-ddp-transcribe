@@ -20,34 +20,34 @@ YODA_INBOX_LOCAL="{{ work_dir }}/inbox" \
 {% elif tiered_storage | bool %}
 # Tiered mode: restore boot from the interim volume (fast). The volume is
 # seeded/refreshed from Yoda by ~/pull-from-yoda.sh (slow, operator-driven).
-if [ ! -f "{{ storage_path }}/state-snapshot.sqlite" ] \
-   && [ -z "$(ls -A "{{ storage_path }}/inbox" 2>/dev/null)" ]; then
-  echo "volume at {{ storage_path }} has no state snapshot and an empty inbox" >&2
+if [ ! -f "{{ storage_root }}/state-snapshot.sqlite" ] \
+   && [ -z "$(ls -A "{{ storage_root }}/inbox" 2>/dev/null)" ]; then
+  echo "volume at {{ storage_root }} has no state snapshot and an empty inbox" >&2
   echo "— seed it from Yoda first: ~/pull-from-yoda.sh" >&2
   exit 1
 fi
-if [ -f "{{ storage_path }}/state-snapshot.sqlite" ]; then
-  cp "{{ storage_path }}/state-snapshot.sqlite" "{{ state_dir }}/state.sqlite"
-  echo "restored state DB from {{ storage_path }}/state-snapshot.sqlite"
+if [ -f "{{ storage_root }}/state-snapshot.sqlite" ]; then
+  cp "{{ storage_root }}/state-snapshot.sqlite" "{{ state_dir }}/state.sqlite"
+  echo "restored state DB from {{ storage_root }}/state-snapshot.sqlite"
 else
   echo "no state snapshot on the volume — fresh campaign (inbox present)"
 fi
-if [ -d "{{ storage_path }}/transcripts" ]; then
-  rsync -a "{{ storage_path }}/transcripts/" "{{ work_dir }}/transcripts/"
+if [ -d "{{ storage_root }}/transcripts" ]; then
+  rsync -a "{{ storage_root }}/transcripts/" "{{ work_dir }}/transcripts/"
   echo "restored transcripts to {{ work_dir }}/transcripts"
 fi
-rsync -a "{{ storage_path }}/inbox/" "{{ work_dir }}/inbox/"
-echo "hydrated inbox: {{ storage_path }}/inbox -> {{ work_dir }}/inbox"
+rsync -a "{{ storage_root }}/inbox/" "{{ work_dir }}/inbox/"
+echo "hydrated inbox: {{ storage_root }}/inbox -> {{ work_dir }}/inbox"
 {% else %}
-if [ -f "{{ storage_path }}/state-snapshot.sqlite" ]; then
-  cp "{{ storage_path }}/state-snapshot.sqlite" "{{ state_dir }}/state.sqlite"
-  echo "restored state DB from {{ storage_path }}/state-snapshot.sqlite"
+if [ -f "{{ storage_root }}/state-snapshot.sqlite" ]; then
+  cp "{{ storage_root }}/state-snapshot.sqlite" "{{ state_dir }}/state.sqlite"
+  echo "restored state DB from {{ storage_root }}/state-snapshot.sqlite"
 else
   echo "no state snapshot on the volume — nothing to restore (fresh batch)"
 fi
 
-if [ -d "{{ storage_path }}/transcripts" ]; then
-  rsync -a "{{ storage_path }}/transcripts/" "{{ work_dir }}/transcripts/"
+if [ -d "{{ storage_root }}/transcripts" ]; then
+  rsync -a "{{ storage_root }}/transcripts/" "{{ work_dir }}/transcripts/"
   echo "restored transcripts to {{ work_dir }}/transcripts"
 fi
 {% endif %}

@@ -86,7 +86,13 @@ on the existing Development version.
 > item with no matching component declaration has zero effect — no error,
 > just silence. This is exactly the bug this remake fixes for the yoda surface.
 
-### New component declarations (six), all Overwritable ✓
+### New component declarations (six)
+
+The five Fixed params are **Overwritable ✓** (needed for the item's
+Make-interactive/Overwrite wiring). `yoda_data_access_password` is
+**Overwritable ✗ (unchecked)** — the Co-Secret must only ever resolve from
+the launching CO's Secrets tab; overwritable would permit an item-level
+literal or an interactive password prompt, both wrong for a secret.
 
 Copied verbatim from spec §4:
 
@@ -97,15 +103,30 @@ Copied verbatim from spec §4:
 | `yoda_user` | Fixed | *(blank)* | Yoda username, e.g. `user@uu.nl` |
 | `yoda_host` | Fixed | `fsw.data.uu.nl` | iRODS host (UU default) |
 | `yoda_zone` | Fixed | `nluu10p` | iRODS zone (UU default) |
-| `yoda_data_access_password` | **Co-Secret** | *(secret)* | Yoda DAP; resolved from the **launching** CO's Secrets tab |
+| `yoda_data_access_password` | **Co-Secret** | `{"key": "yoda_data_access_password", "sensitive": 1}` | Yoda DAP; resolved from the **launching** CO's Secrets tab |
+
+> **Co-Secret declaration format:** the Default value field of a Co-Secret
+> parameter takes a JSON object, not a bare key name:
+> `{"key": "<secret name on the CO Secrets tab>", "sensitive": 1}`.
+> `sensitive: 1` (the default) keeps the value out of provisioning logs — do
+> not set 0 for a password. The `key` string must exactly match the secret's
+> name on the **launching** CO's Secrets tab or the lookup silently resolves
+> nothing (preflight then fails with the S1 message).
 
 ### Existing-param updates
 
-- **`storage_path` description** becomes backend-aware: for mount backends
-  (`src-volume` / `research-drive`) it's the durable sink; for `yoda` it's an
-  **optional interim fast tier** — a blank/unedited value means direct-to-Yoda
-  (plain mode), a real mounted path activates **tiered mode** (see §4 and the
-  design spec §2–3).
+- **`storage_path` is now an optional override** — preflight **auto-detects**
+  the attached volume: SRC mounts volumes at `/home/<user>/data/<volume-name>`,
+  so when exactly one mount exists there it is adopted automatically (resolved
+  into the `storage_root` fact all consumers use; SRC extra-vars outrank
+  `set_fact`, hence the separate fact name). An unedited `<...>` placeholder
+  counts as unset; multiple volumes fail loudly asking for an explicit path.
+  Mount backends still require a volume (detected or explicit); on `yoda` a
+  resolved volume activates **tiered mode**, no volume means direct-to-Yoda.
+  Suggested description: *"Mount path of the attached storage volume. Usually
+  leave as-is: with exactly one volume attached the workspace finds it
+  automatically. Set explicitly only with multiple volumes. Yoda backend:
+  attaching a volume enables tiered mode; no volume = direct-to-Yoda."*
 - **`download_workers`** flips from Keep to **Interactive** at the item (D11)
   — likely the campaign bottleneck (S16), so it needs to be tunable per-launch
   rather than fixed at `3`.
@@ -139,14 +160,18 @@ with (S1).
    regenerate if present, or confirm separately that it will survive to
    `gocmd`.
 2. **Create the `yoda_data_access_password` Co-Secret** on that CO's Secrets
-   tab with the fresh DAP.
+   tab with the fresh DAP. The secret's name must be exactly
+   `yoda_data_access_password` — it must match the `key` in the component's
+   Co-Secret declaration JSON (see §2).
 3. **Create the SRC volume** in the same CO: SRC portal → CREATE NEW →
    storage card → SURF HPC Cloud volume → same CO as the workspace → name it
    (e.g. `ddp-transcribe-<study>`).
    - **Size generously and check growability first** (S11): the volume holds
      accumulating transcripts + inbox + state snapshots with no pruning across
-     a 35–70-day campaign. If the volume type isn't growable in place,
-     oversize at creation rather than planning a mid-campaign resize.
+     a 35–70-day campaign; budget ~2× the transcript tree — hop 2 stages shard
+     tars (`transcripts-tars/`) on the volume alongside the extracted files
+     (S11). If the volume type isn't growable in place, oversize at creation
+     rather than planning a mid-campaign resize.
 4. **Note the DAP renewal calendar date** (~day 28 of the campaign): the Yoda
    PAM token TTL (`yoda_auth_ttl_hours: 720`, i.e. 30 days) is shorter than the
    campaign, and the DAP is deliberately never written to disk, so renewal is
@@ -164,8 +189,9 @@ flavour); fallback is 1×A10 (doubles wallclock, unblocks if 2×A10 is
 unavailable).
 
 **5. Launch = Tier-5 validation** — 2×A10, `storage_backend=yoda`, interactive
-values for `yoda_collection` / `yoda_user` / `storage_path` /
-`download_workers`, volume attached at the second-to-last wizard step
+values for `yoda_collection` / `yoda_user` / `download_workers`; leave
+`storage_path` at its placeholder (the single attached volume is
+auto-detected); volume attached at the second-to-last wizard step
 ("Attach the storage volume").
 
 **6. Validation checklist** (run on the launched machine before the campaign
@@ -211,8 +237,8 @@ surface.
 | S6 | CUDA floats with NVIDIA latest | whisper-rs build breaks on a future release → SRC CUDA component installs NVIDIA current → force our pinned 13.2 toolkit (install even when nvcc present) |
 | S7 | Component recreated instead of edited | params vanish from the item → new component ≠ referenced development version → always **edit** the existing component |
 | S8 | Undeclared param silently absent | value set at item has no effect → SRC only passes declared params → declare at the component first (that's this remake) |
-| S9 | Placeholder default left unedited | preflight fails loudly on `<username-fill-me-in>`-style paths → by design; fill the interactive fields |
-| S10 | Volume/`storage_path` mismatch | tiered preflight assert fails → path must be exactly `/home/<pipeline_user>/data/<volume-name>` (`volume_mount_no_name=false`) → fix the interactive value |
+| S9 | Placeholder default left unedited | `pipeline_user` / `yoda_collection` / `yoda_user` placeholders fail loudly at preflight → by design; fill those interactive fields. Exception: `storage_path`'s placeholder is the happy path — it means "auto-detect the attached volume" |
+| S10 | Volume path mismatch / ambiguity | preflight fails (path not found, or multiple volumes listed) → auto-detection adopts the single mount under `~/data`; several mounts or a typo'd explicit `storage_path` fail loudly → leave `storage_path` at the placeholder with exactly one volume attached, or set it to the exact mount |
 | S11 | Undersized volume mid-campaign | volume fills ~week N → transcripts accumulate, no pruning → size generously at creation; check growability beforehand |
 | S12 | R11 two-GPU claim contention | stale `processing` rows / double-claims → first real concurrent test → validation step watches the state DB; pipeline-repo issue if seen |
 | S13 | First hop-2 push at scale | `bun -x` timeout / server saturation → huge first delta → `YODA_BUN_TIMEOUT` generous (≥1200 s), `YODA_THREADS ≤ 15` (30 saturated the server 2026-07-06) |
