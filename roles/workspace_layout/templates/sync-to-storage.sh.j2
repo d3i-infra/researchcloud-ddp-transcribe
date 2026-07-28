@@ -3,6 +3,11 @@
 # Pushes the boot-disk hot path to the durable storage backend (ADR 0032).
 # Called automatically by run-pipeline*.sh at the end of a `process` run; also
 # safe to run by hand (e.g. to checkpoint a long run during a pause).
+{% if tiered_storage | bool %}
+# Tiered mode (yoda + interim volume): this is hop 1 — fast rsync, boot disk
+# -> volume, safe at every batch end. Hop 2 (volume -> Yoda, slow) is
+# ~/push-to-yoda.sh, run by the operator (~daily).
+{% endif %}
 set -euo pipefail
 
 # Serialize concurrent syncs: on a 2-GPU workspace both run-pipeline instances
@@ -11,7 +16,7 @@ set -euo pipefail
 exec 9>"{{ state_dir }}/.sync.lock"
 flock 9
 
-{% if storage_backend == 'yoda' %}
+{% if storage_backend == 'yoda' and not tiered_storage | bool %}
 # Yoda (iRODS) sink via GoCommands. Snapshot the state DB locally first (a
 # consistent online .backup, NOT a raw WAL copy), then push transcripts + the
 # snapshot through the shared yoda-sync.sh.

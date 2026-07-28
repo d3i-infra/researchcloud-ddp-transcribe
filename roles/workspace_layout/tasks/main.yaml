@@ -8,18 +8,15 @@
 # a state snapshot. run-pipeline*.sh auto-syncs boot disk -> volume after each
 # `process` run via sync-to-storage.sh. No systemd: runs are operator-driven.
 
-- name: Create durable directories on the storage volume (seed + sink)
+- name: Create durable directories on the storage volume (seed + sink / interim tier)
   ansible.builtin.file:
     path: "{{ storage_path }}/{{ item }}"
     state: directory
     owner: "{{ pipeline_user }}"
     group: "{{ pipeline_group }}"
     mode: "0755"
-  loop:
-    - inbox        # input: DDP JSONs, read once at ingest
-    - transcripts  # durable sink: sync-to-storage.sh rsyncs here
-    - archive
-  when: storage_backend != 'yoda'   # Yoda has no mount; collections live in iRODS
+  loop: "{{ ['inbox', 'transcripts'] + (['archive'] if storage_backend != 'yoda' else []) }}"
+  when: storage_backend != 'yoda' or tiered_storage | bool
 
 - name: Create boot-disk inbox for the yoda backend (pulled from the collection)
   ansible.builtin.file:
@@ -84,3 +81,15 @@
   loop:
     - sync-to-storage.sh
     - restore-from-storage.sh
+
+- name: Generate tiered-mode Yoda hop helpers (volume <-> collection)
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ pipeline_home }}/{{ item }}"
+    owner: "{{ pipeline_user }}"
+    group: "{{ pipeline_group }}"
+    mode: "0755"
+  loop:
+    - push-to-yoda.sh
+    - pull-from-yoda.sh
+  when: tiered_storage | bool
