@@ -100,4 +100,19 @@ run c7.log -e storage_backend=src-volume -e "$(mounts "${DATA}/vol1")" \
 check "placeholder: play succeeds"           bash -c "! grep -q 'failed=1' '${TMP}/c7.log'"
 check "placeholder: detection supersedes"    grep -qF "RESOLVED storage_root=[${DATA}/vol1]" "${TMP}/c7.log"
 
+# ---- 8. symlink flavor: ~/data/<vol> -> shared mount elsewhere -------------
+# SRC (per operator report) may mount volumes once at a shared path and give
+# each user a symlink under ~/data; detection must follow the link and match
+# its TARGET against the mount table, adopting the ~/data-side path.
+rm -rf "${DATA}"; mkdir -p "${DATA}" "${TMP}/shared/vol1"
+ln -s "${TMP}/shared/vol1" "${DATA}/vol1"
+run c8.log -e storage_backend=src-volume -e "$(mounts "${TMP}/shared/vol1")"
+check "symlinked volume: play succeeds"      bash -c "! grep -q 'failed=1' '${TMP}/c8.log'"
+check "symlinked volume: adopted via link"   grep -qF "RESOLVED storage_root=[${DATA}/vol1]" "${TMP}/c8.log"
+
+# ---- 9. stray plain dir (not a mount, not a link to one) is rejected -------
+rm -rf "${DATA}"; mkdir -p "${DATA}/not-a-volume"
+run c9.log -e storage_backend=src-volume -e '{"storage_mounts_source": []}'
+check "stray dir: play fails (no volume)"    grep -q 'failed=1' "${TMP}/c9.log"
+
 echo; [ "${FAIL}" -eq 0 ] && echo "ALL PASS" || { echo "${FAIL} FAILURES"; exit 1; }

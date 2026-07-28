@@ -110,11 +110,13 @@ HOT (boot disk)                INTERIM (SRC volume)              DURABLE (Yoda)
 ```
 
 **Activation:** tiered mode is `storage_backend: yoda` **and** a resolved
-storage volume. Preflight resolves the volume automatically: SRC mounts
-attached volumes at `/home/<user>/data/<volume-name>`, and exactly one mount
-there is adopted with no parameter needed (multiple mounts fail loudly and
-ask for an explicit `storage_path`; an unedited `<...>` placeholder counts as
-unset). The resolved path lives in the `storage_root` fact — SRC parameters
+storage volume. Preflight resolves the volume automatically: SRC surfaces
+attached volumes under `~/data/<volume-name>` — as the mount point itself or
+as a per-user symlink to a shared mount; an entry counts as a volume iff it
+(or its symlink target) appears in the mount table, and exactly one such
+entry is adopted with no parameter needed (multiple fail loudly and ask for
+an explicit `storage_path`; an unedited `<...>` placeholder counts as unset;
+plain boot-disk directories never qualify). The resolved path lives in the `storage_root` fact — SRC parameters
 arrive as extra-vars, which `set_fact` cannot override, so the raw
 `storage_path` input and the resolved fact are deliberately distinct names.
 Plain `yoda` (no volume attached) and `src-volume` behavior are unchanged.

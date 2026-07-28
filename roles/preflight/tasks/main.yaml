@@ -75,21 +75,56 @@
 # raw storage_path INPUT is resolved into the storage_root FACT that every
 # consumer (workspace_layout, generated scripts) uses. An unedited portal
 # placeholder (contains '<') counts as unset. When unset, auto-detect: SRC
-# mounts attached volumes at <home>/data/<volume-name>, so exactly one mount
-# there is unambiguous. storage_mounts_source / storage_data_root are
-# testability seams (defaults are the real mount table / real data dir).
+# surfaces attached volumes under <home>/data/<volume-name> — either as the
+# mount point itself or as a per-user symlink to a shared mount — so each
+# entry there counts as a volume iff it (or its symlink target) appears in
+# the mount table; exactly one such entry is unambiguous. Plain directories
+# on the boot disk never qualify (no silent boot-disk fallback).
+# storage_mounts_source / storage_data_root are testability seams (defaults
+# are the real mount table / real data dir).
 
-- name: Detect attached storage volumes (when storage_path is not set)
+- name: Record mounted filesystem targets (volume auto-detection input)
   ansible.builtin.set_fact:
-    storage_candidates: >-
+    storage_mount_targets: >-
       {{ (storage_mounts_source | default(ansible_mounts))
-         | map(attribute='mount')
-         | select('match',
-                  '^' ~ (storage_data_root | default(pipeline_home ~ '/data') | regex_escape) ~ '/[^/]+$')
-         | list }}
+         | map(attribute='mount') | list }}
+    storage_candidates: []
   when: >-
     (storage_path | default('') | length == 0)
     or ('<' in storage_path | default(''))
+
+- name: List entries under the data dir (volumes may be symlinks to a shared mount)
+  ansible.builtin.find:
+    paths: "{{ storage_data_root | default(pipeline_home ~ '/data') }}"
+    file_type: any
+    recurse: false
+  register: storage_data_entries
+  when: storage_mount_targets is defined
+
+- name: Inspect data-dir entries (symlink targets vs the mount table)
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop: "{{ storage_data_entries.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: storage_entry_stats
+  when: storage_mount_targets is defined
+
+- name: Detect attached storage volumes (entry or its symlink target is mounted)
+  ansible.builtin.set_fact:
+    storage_candidates: "{{ storage_candidates + [item.stat.path] }}"
+  loop: "{{ storage_entry_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.stat.path | default('(skipped)') }}"
+  when:
+    - storage_mount_targets is defined
+    - item.stat is defined
+    - >-
+      (item.stat.islnk | default(false)
+       and item.stat.lnk_source | default('') in storage_mount_targets)
+      or (item.stat.isdir | default(false)
+          and item.stat.path in storage_mount_targets)
 
 - name: Fail on ambiguous storage volume auto-detection
   ansible.builtin.fail:
@@ -132,6 +167,7 @@
 - name: Check storage_root exists (mount backends + tiered yoda)
   ansible.builtin.stat:
     path: "{{ storage_root }}"
+    follow: true   # a volume may be reached via a ~/data symlink
   register: storage_stat
   when: storage_backend != 'yoda' or tiered_storage | bool
 
