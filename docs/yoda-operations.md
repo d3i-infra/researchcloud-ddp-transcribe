@@ -121,6 +121,22 @@ Consequences:
   re-lists remote collections at ~3 s/op. Decide thread counts early; run long
   syncs in `tmux`.
 
+## Campaign checkpoint ritual (tiered mode, continuous runners)
+
+The batch-end auto-sync (hop 1) only fires when a `process` invocation
+*exits*. Uncapped campaign runners grind for weeks without exiting, so the
+volume — and therefore anything hop 2 pushes, including the resume snapshot —
+goes stale unless hop 1 is run by hand first (observed live 2026-07-29: a
+pushed snapshot lagged the DB by hours). The operator ritual, safe with
+runners hot (write-once artifacts, flock, live-safe `.backup`), ~daily:
+
+```
+~/sync-to-storage.sh && YODA_EXTRACT=0 ~/push-to-yoda.sh
+```
+
+(`YODA_EXTRACT=0` while extraction is policy-blocked on the collection — see
+FOLLOWUPS. Never run two `push-to-yoda.sh` concurrently: shared staging dir.)
+
 ## Transfer recipes
 
 - **`gocmd sync SRC DEST` is dual-mode:** if DEST exists it creates

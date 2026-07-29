@@ -245,16 +245,44 @@ surface.
 | S14 | Boot-disk watermark | `ENOSPC` late in campaign → ~3M transcripts ≈ 30–40 GB + models + toolkit on 100 GB → fine but monitor `df -h`; escalate to pruning design only if real |
 | S15 | 80/443 open, nothing listens | scanner/reviewer alarm → immutable item rules, no service bound → expected; do not "fix" |
 | S16 | `download_workers` pacing | GPUs idle, inbox starving / TikTok rate-limits → downloader is the campaign bottleneck → set per-launch (now Interactive), tune from observed throughput |
+| S17 | Component log fully censored on yoda launches | provisioning failure shows only "censored / no_log" → SRC-External's wrapper `no_log`s its whole result because the Co-Secret is on its command line — every preflight fail_msg is invisible → debug input-side: check the launching CO's secret, the interactive values, then replay preflight locally (`scripts/test-preflight-autodetect.sh` pattern); confirmed live 2026-07-28 |
 
 ## 6. Validation log
 
-_(fill in at launch)_
+**Launch 1 — 2026-07-28, workspace `2c665b20` — FAILED at preflight (17 s).**
+Root causes: `storage_backend` was not wired Interactive at the item (launch
+ran `src-volume` despite yoda values filled), and `~/data` is a symlink to a
+shared mount root, which the then-current auto-detection missed (fixed same
+day, PR #7). Output was fully censored (S17). SRC auto-destroyed the failed
+workspace.
 
-- **Workspace name:**
-- **Flavour:**
-- **Cold provision wallclock:**
-- **Boot-disk high-water (`df -h`):**
-- **Per-video rates:**
-- **Hop-1 wallclock (sync-to-storage.sh):**
-- **Hop-2 wallclock (push-to-yoda.sh):**
-- **R11 observations (two-GPU claim contention):**
+**Launch 2 — 2026-07-28, workspace `474557fc` (`uutiktok`) — GREEN, campaign
+machine.**
+
+- **Workspace name:** UU Tiktok DDP Transcription Run (`uutiktok`)
+- **CO:** perceptions of crime policing - UU; volume `transcription-pipeline-run` (250 GB)
+- **Flavour:** A10 - 2 GPU (`gpu-a10-22core-176gb-50gb-3tb`; 48 gpu-hrs/day
+  confirms 2 GPUs; each instance sees 1 device via `CUDA_VISIBLE_DEVICES`)
+- **Cold provision wallclock:** ~14 min (17:48 launch → ~18:02 layout on volume);
+  zero manual fixes
+- **Auto-detect:** adopted `/data/transcription-pipeline-run` (`/dev/vdc1`, xfs)
+  through the symlinked `~/data` root; correctly rejected the stray `datasets`
+  dir (not in mount table). Tiered mode active (all six generated scripts).
+- **Ingest:** 2,982,461 unique videos from 141/142 donor files, 4,847,392
+  history rows, 2,386,212 duplicates collapsed, 16 invalid URLs — 29 min.
+- **Per-video rates:** transcription 0.3–0.7 s/video/GPU (large-v3-turbo,
+  flash-attn); observed campaign throughput ~1.05 videos/s on 2 GPUs
+  (download-paced) → ≈33 days for the full queue. Failure rate first 2k batch:
+  ~13% (breakdown not yet taxonomized).
+- **Hop 1:** seconds; auto at batch end — NOTE: uncapped runners never hit a
+  batch end; ritual is `sync-to-storage.sh && push-to-yoda.sh` (FOLLOWUPS).
+- **Hop 2:** minutes at 13k scale; **`YODA_EXTRACT=0` required** — server-side
+  extraction is `MSI_OPERATION_NOT_ALLOWED` on this collection (FOLLOWUPS, FSW).
+- **R11 observations:** concurrent 13+10-video runs — zero stale claims, no
+  double-claims, flock serialized both batch-end syncs. ONE anomaly: the
+  `claimed=13` run's DB updates were apparently lost (its videos reverted to
+  pending; transcripts existed) and were idempotently re-done by a later sweep
+  (ADR 0008). Watch-item: `pending` must only decrease; a bump = recurrence.
+  Filed against the pipeline repo.
+- **Pipeline:** started on `v0.2.0-rc1`; upgraded in place to `v0.3.0`
+  2026-07-29 (item's `pipeline_git_ref` overwrite updated to match).

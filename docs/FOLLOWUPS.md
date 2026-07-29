@@ -112,3 +112,52 @@ repo's `docs/FOLLOWUPS.md`.)
   disconnects at `--timeout`?** Untested (deliberately — server-load
   politeness). Also for the FSW thread. Until known, size
   `YODA_BUN_TIMEOUT` generously (default 1200 s covers ~10k-file shards).
+
+- **Server-side extraction is policy-blocked on the campaign collection
+  (2026-07-28).** `gocmd bun -x` returns iRODS `-1110000
+  MSI_OPERATION_NOT_ALLOWED` on `/nluu10p/home/research-tiktok-crime-policing`
+  — although extraction worked on fsw.data.uu.nl during the 2026-07-13/14
+  live validation (different collection). Asked of FSW (pending thread): is
+  the microservice policy per-group/category, and can it be enabled here?
+  Until then the campaign runs with `YODA_EXTRACT=0` (archive-only sink,
+  the designed fallback); pending-extraction tracking means one ordinary
+  `push-to-yoda.sh` back-fills the browsable `transcripts/` tree once
+  allowed. NOTE the inspector data-plane contract promises that extracted
+  tree — if the ban stands, the inspector must pull + extract tars instead.
+
+- **A Co-Secret in the parameter set censors the ENTIRE component log (S17).**
+  SRC-External's "Run Ansible plugin" wrapper task `no_log`s its result when
+  the command line carries a Co-Secret, so every fail_msg we write is
+  invisible in the portal on yoda launches (observed 2026-07-28: a preflight
+  assert failure surfaced only as "censored"). Nothing fixable client-side;
+  debugging path is input-side elimination + local preflight replay
+  (`scripts/test-preflight-autodetect.sh` pattern). Consider asking SURF
+  whether per-task output can be preserved with secrets masked.
+
+- **`yoda-sync.sh` masks local filesystem errors as "remote missing"
+  (2026-07-29).** A `gocmd get` that failed because the LOCAL parent dir
+  didn't exist printed "no state snapshot in collection — fresh batch". On a
+  restore that mask could silently start a fresh batch despite a present
+  snapshot. Fix: distinguish remote not-found from local errors; fail loudly
+  on the latter. Verify at the same time whether the pull path overwrites an
+  existing local snapshot or silently keeps the stale file (suspected on the
+  2026-07-29 local mirror pull).
+
+- **Continuous (uncapped) runs never trigger hop 1 — the documented ritual is
+  `sync-to-storage.sh && push-to-yoda.sh` (2026-07-29).** The batch-end
+  auto-sync only fires when a `process` invocation exits; an uncapped
+  campaign runner grinds for weeks, so the volume (and thus any hop-2 push
+  and the Yoda snapshot) goes stale unless hop 1 is run by hand first.
+  Observed live: a pushed snapshot lagged the DB by hours. Documented in
+  `yoda-operations.md`; longer-term, the pipeline could checkpoint
+  periodically (pipeline-repo follow-up).
+
+- **`yoda-sync.sh` could derive its paths from a single `YODA_LOCAL_ROOT`.**
+  Operators mirroring a collection locally must export three env vars per
+  invocation; the collection layout is a contract, so one root would do.
+  Quality-of-life; came up during the 2026-07-29 researcher-mirror setup.
+
+- **Ingest consumed 141 of 142 inbox entries (2026-07-28).** One inbox file
+  was skipped without a named reason in the summary line. Identify the odd
+  file out (likely a non-DDP artifact) and make ingest name skipped files.
+  (If it IS a donor DDP that failed to parse, that's a pipeline-repo bug.)
