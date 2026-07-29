@@ -5,6 +5,32 @@ repo's `docs/FOLLOWUPS.md`.)
 
 ## Open
 
+- **`sync-to-storage.sh` (tiered/mount branch) ships stale state snapshots on
+  rsync exit 24.** Observed live twice, 2026-07-29: a mid-run sync hits
+  `file has vanished: …/transcripts/.work/ytdlp-*/…` (in-flight yt-dlp
+  transients live inside the synced tree), rsync exits 24, and under
+  `set -euo pipefail` the script dies at the rsync line — **before** the
+  `sqlite3 .backup` — so the staged `state-snapshot.sqlite` silently keeps its
+  old content while gaining a fresh mtime; a later `push-to-yoda.sh` then
+  relays the stale snapshot (the operator's workstation pull delivered
+  morning-old data with an afternoon timestamp). Neither failed run printed
+  the script's final `synced:` line — that absence is the tell. Fix, in
+  `roles/workspace_layout/templates/sync-to-storage.sh.j2` (mount/tiered
+  branch; the yoda-direct branch already backs up first): (1) move the
+  `.backup` **above** the rsync so snapshot freshness is never hostage to
+  artifact sync; (2) `--exclude='.work/'` on the rsync (removes the vanished
+  class entirely — transients were never sync-worthy) plus the already-noted
+  `--exclude='*.tmp-*'` (unique tmp names can ride into shard tars);
+  (3) tolerate the race regardless: `rsync … || [ $? -eq 24 ]` (works under
+  `set -e`). Interim: hand-apply the same three edits to the rendered
+  `~/sync-to-storage.sh` on the live workspace (consciously — it's generated)
+  until a relaunch re-renders. **Blocking dependency:** ddp-transcribe's
+  Epic 5a plans a `process --checkpoint-cmd ~/sync-to-storage.sh` periodic
+  hook; pointing it at the script in its current form would both count every
+  cycle as failed (exit 24) and stale the snapshot every interval. Verify by
+  content, not mtime: `SELECT datetime(MAX(at),'unixepoch') FROM video_events`
+  must be near the backup time.
+
 - **CUDA version is not pinned on SRC.** SRC's CUDA component does `apt install
   cuda` off the dynamic keyring, pulling NVIDIA's *current* release (13.3 +
   driver 610 as provisioned at Tier 5; builds cleanly). Our `cuda` role defers
