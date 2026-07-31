@@ -15,8 +15,13 @@
 #   YODA_TAR_STAGE         staging dir for shard tars (basename must be
 #                          `transcripts-tars`; default: sibling of the
 #                          transcripts dir)
-#   YODA_THREADS           gocmd transfer threads (default 10; keep <=15 —
-#                          30 saturated the server for all users)
+#   YODA_THREADS           gocmd transfer threads (default 2; upload is
+#                          bandwidth-bound so low counts cost ~nothing.
+#                          Threads must fit the client connection pool with
+#                          headroom — 10 threads died mid-push with
+#                          "connection pool is full (occupied: 3, max: 3)",
+#                          2026-07-31. Keep <=15 regardless — 30 saturated
+#                          the server for all users)
 #   YODA_EXTRACT           set 0 to skip server-side extraction of changed
 #                          shards into <collection>/transcripts (default on)
 #   YODA_BUN_TIMEOUT       gocmd bun -x client timeout in seconds
@@ -95,8 +100,11 @@ pull_transcript_tars() {
   mkdir -p "$(dirname "${stage}")"
   echo "[yoda-sync] pull shard tars: ${YODA_COLLECTION}/transcripts-tars -> ${stage}"
   # `gocmd get` of a collection lands it as <dest>/<collection-basename>,
-  # i.e. exactly ${stage} when dest is its parent.
-  gocmd get -f "$(irods "${YODA_COLLECTION}/transcripts-tars")" "$(dirname "${stage}")"
+  # i.e. exactly ${stage} when dest is its parent. Single-threaded: gocmd
+  # v0.12.x intermittently sizes its connection pool at 1 for collection
+  # gets and multi-threaded transfer then dies with "connection pool is
+  # full (occupied: 1, max: 1)"; one connection can't exhaust it.
+  gocmd get -f --single_threaded "$(irods "${YODA_COLLECTION}/transcripts-tars")" "$(dirname "${stage}")"
   mkdir -p "${YODA_TRANSCRIPTS_LOCAL}"
   local t n=0
   for t in "${stage}"/shard-*.tar; do
@@ -145,9 +153,10 @@ push_transcripts() {
   echo "[yoda-sync] push shard tars: ${stage} -> ${YODA_COLLECTION}/transcripts-tars (${#changed[@]} pending extraction)"
   # Sync the staging dir at the collection base: gocmd's basename-append rule
   # lands it as <collection>/transcripts-tars. Unchanged shards are byte-
-  # identical (reproducible tars) so the checksum diff skips them. Threads
-  # capped <=15: 30 saturated the server for all users (2026-07-06).
-  gocmd sync --thread_num "${YODA_THREADS:-10}" "${stage}" "$(irods "${YODA_COLLECTION}")"
+  # identical (reproducible tars) so the checksum diff skips them. Default
+  # threads pool-safe (see header); cap <=15: 30 saturated the server for
+  # all users (2026-07-06).
+  gocmd sync --thread_num "${YODA_THREADS:-2}" "${stage}" "$(irods "${YODA_COLLECTION}")"
   if [ "${YODA_EXTRACT:-1}" != "0" ] && [ "${#changed[@]}" -gt 0 ]; then
     # Server-side extraction into the browsable per-file projection
     # (~13-14 files/s server-side, measured 2026-07-13). -f is required for
@@ -178,7 +187,7 @@ push_transcripts() {
 push_transcripts_plain() {
   : "${YODA_TRANSCRIPTS_LOCAL:?set YODA_TRANSCRIPTS_LOCAL}"
   echo "[yoda-sync] push transcripts (plain per-file): ${YODA_TRANSCRIPTS_LOCAL} -> ${YODA_COLLECTION}/$(basename "${YODA_TRANSCRIPTS_LOCAL}")"
-  gocmd sync --thread_num "${YODA_THREADS:-10}" "${YODA_TRANSCRIPTS_LOCAL}" "$(irods "${YODA_COLLECTION}")"
+  gocmd sync --thread_num "${YODA_THREADS:-2}" "${YODA_TRANSCRIPTS_LOCAL}" "$(irods "${YODA_COLLECTION}")"
 }
 
 push_state() {

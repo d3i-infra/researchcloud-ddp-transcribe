@@ -48,7 +48,7 @@ draft — in particular `model_small`'s default is `true`, not `false`.
 | `model_large_v3_turbo` | Interactive | `true` | ~573 MB, recommended production model |
 | `model_small` | Interactive | **`true`** | ~466 MB multilingual fallback — portal is authoritative here, not `false` |
 | `model_tiny_en` | Interactive | `false` | ~75 MB, English-only, smoke-test speed |
-| `pipeline_git_ref` | Keep | `v0.2.0-rc1` | pipeline repo tag (two version pins — see §2) |
+| `pipeline_git_ref` | Keep | `v0.2.0-rc1` | pipeline repo tag (two version pins — see §2); the item **overwrite** governs — `v0.4.0` since 2026-07-31, playbook default bumped to match |
 | `pipeline_user` | Interactive | placeholder `<username-fill-me-in>` | workspace account owning the run layout |
 | `run_smoke_test` | Keep | `false` | init+ingest against a bundled fixture at provision |
 | `storage_path` | Interactive | placeholder `/home/<username>/data/<volume-name>` | mount point of the attached storage volume |
@@ -217,10 +217,10 @@ starts):
 **7. Campaign start**, then promote the component **Development → Live** and
 fill in the item record + validation log in this doc.
 
-> **Launch gate:** the 3M campaign run waits on a pending update to
-> `daniellemccool/ddp-transcribe` (the pipeline repo). Once its tag is cut,
-> the item's `pipeline_git_ref` overwrite gets updated to it — until then, the
-> launch uses `v0.2.0-rc1` as declared above.
+> **Launch gate (historical):** the campaign launched 2026-07-28 on
+> `v0.2.0-rc1`; since then the pipeline ref is governed by the item's
+> `pipeline_git_ref` overwrite (see the §6 pipeline history line for the
+> bumps).
 
 ## 5. Snag list (deploy-time debugging playbook)
 
@@ -245,16 +245,51 @@ surface.
 | S14 | Boot-disk watermark | `ENOSPC` late in campaign → ~3M transcripts ≈ 30–40 GB + models + toolkit on 100 GB → fine but monitor `df -h`; escalate to pruning design only if real |
 | S15 | 80/443 open, nothing listens | scanner/reviewer alarm → immutable item rules, no service bound → expected; do not "fix" |
 | S16 | `download_workers` pacing | GPUs idle, inbox starving / TikTok rate-limits → downloader is the campaign bottleneck → set per-launch (now Interactive), tune from observed throughput |
+| S17 | Component log fully censored on yoda launches | provisioning failure shows only "censored / no_log" → SRC-External's wrapper `no_log`s its whole result because the Co-Secret is on its command line — every preflight fail_msg is invisible → debug input-side: check the launching CO's secret, the interactive values, then replay preflight locally (`scripts/test-preflight-autodetect.sh` pattern); confirmed live 2026-07-28 |
+| S18 | gocmd connection-pool cap | push dies mid-`push-transcripts` with "Failed to establish a new connection to iRODS server as connection pool is full (occupied: 3, max: 3)" (2026-07-31, `--thread_num 10`) → transfer threads exceed the client's connection pool — suspected gocmd newer than the v0.12.2 the docs were verified against (diagnostics pending: `gocmd --version`; `gocmd sync --help \| grep -i 'conn\|thread'`) → `YODA_THREADS` must fit the pool with headroom (now defaults to 2; upload is bandwidth-bound so low counts cost ~nothing); retry is safe/idempotent (reproducible tars + checksum-diff sync). NOTE `set -e`: a pool failure in `push-transcripts` skips `push-state` — the rerun does both halves |
+| S19 | v0.4.0 GPU-misconfig hard-fail (pipeline ADR-0013) | a CUDA build on a misconfigured GPU **refuses to start** → deliberate assertion, no silent CPU fallback → expected behavior, not a snag to "fix": provisioning/validation smoke must expect hard-fail rather than degraded throughput; verified 2026-07-31 on the paused SRC workspace (cuda build 2 m 11 s, 6/6 GPU engine-init tests) |
 
 ## 6. Validation log
 
-_(fill in at launch)_
+**Launch 1 — 2026-07-28, workspace `2c665b20` — FAILED at preflight (17 s).**
+Root causes: `storage_backend` was not wired Interactive at the item (launch
+ran `src-volume` despite yoda values filled), and `~/data` is a symlink to a
+shared mount root, which the then-current auto-detection missed (fixed same
+day, PR #7). Output was fully censored (S17). SRC auto-destroyed the failed
+workspace.
 
-- **Workspace name:**
-- **Flavour:**
-- **Cold provision wallclock:**
-- **Boot-disk high-water (`df -h`):**
-- **Per-video rates:**
-- **Hop-1 wallclock (sync-to-storage.sh):**
-- **Hop-2 wallclock (push-to-yoda.sh):**
-- **R11 observations (two-GPU claim contention):**
+**Launch 2 — 2026-07-28, workspace `474557fc` (`uutiktok`) — GREEN, campaign
+machine.**
+
+- **Workspace name:** UU Tiktok DDP Transcription Run (`uutiktok`)
+- **CO:** perceptions of crime policing - UU; volume `transcription-pipeline-run` (250 GB)
+- **Flavour:** A10 - 2 GPU (`gpu-a10-22core-176gb-50gb-3tb`; 48 gpu-hrs/day
+  confirms 2 GPUs; each instance sees 1 device via `CUDA_VISIBLE_DEVICES`)
+- **Cold provision wallclock:** ~14 min (17:48 launch → ~18:02 layout on volume);
+  zero manual fixes
+- **Auto-detect:** adopted `/data/transcription-pipeline-run` (`/dev/vdc1`, xfs)
+  through the symlinked `~/data` root; correctly rejected the stray `datasets`
+  dir (not in mount table). Tiered mode active (all six generated scripts).
+- **Ingest:** 2,982,461 unique videos from 141/142 donor files, 4,847,392
+  history rows, 2,386,212 duplicates collapsed, 16 invalid URLs — 29 min.
+- **Per-video rates:** transcription 0.3–0.7 s/video/GPU (large-v3-turbo,
+  flash-attn); observed campaign throughput ~1.05 videos/s on 2 GPUs
+  (download-paced) → ≈33 days for the full queue. Failure rate first 2k batch:
+  ~13% (breakdown not yet taxonomized).
+- **Hop 1:** seconds; auto at batch end — NOTE: uncapped runners never hit a
+  batch end; ritual is `sync-to-storage.sh && push-to-yoda.sh` (FOLLOWUPS).
+- **Hop 2:** minutes at 13k scale; **`YODA_EXTRACT=0` required** — server-side
+  extraction is `MSI_OPERATION_NOT_ALLOWED` on this collection (FOLLOWUPS, FSW).
+- **R11 observations:** concurrent 13+10-video runs — zero stale claims, no
+  double-claims, flock serialized both batch-end syncs. ONE anomaly: the
+  `claimed=13` run's DB updates were apparently lost (its videos reverted to
+  pending; transcripts existed) and were idempotently re-done by a later sweep
+  (ADR 0008). Watch-item: `pending` must only decrease; a bump = recurrence.
+  Filed against the pipeline repo.
+- **Pipeline:** started on `v0.2.0-rc1`; upgraded in place to `v0.3.0`
+  2026-07-29 (item's `pipeline_git_ref` overwrite updated to match);
+  overwrite bumped to `v0.4.0` 2026-07-31 (component **edit**, S7) for
+  future provisions — the campaign VM binary stays on `v0.3.0`. v0.4.0
+  deploy-relevant changes: per-attempt `.work/ytdlp-<id>.<pid>-<seq>/` dirs
+  with lifecycle cleanup + age-gated startup sweep, `requeue-failures`
+  operator subcommand, ADR-0013 GPU-misconfig hard-fail (S19).

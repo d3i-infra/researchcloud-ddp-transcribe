@@ -3,8 +3,8 @@
 # Hop 2 of tiered storage: push the interim volume to the Yoda collection —
 # shard tars + server-side extraction via the shared yoda-sync.sh. Slow
 # (minutes at campaign scale); operator-driven (~daily / at milestones).
-# Tunables (env): YODA_THREADS (default 10, keep <=15), YODA_EXTRACT,
-# YODA_BUN_TIMEOUT — see yoda-sync.sh header.
+# Tunables (env): YODA_THREADS (default 2, pool-safe; keep <=15),
+# YODA_EXTRACT, YODA_BUN_TIMEOUT — see yoda-sync.sh header.
 set -euo pipefail
 
 stable="{{ storage_root }}/.state-snapshot.hop2.sqlite"

@@ -44,7 +44,7 @@
   become: true
   vars:
     pipeline_git_repo: "https://github.com/daniellemccool/ddp-transcribe"
-    pipeline_git_ref: "v0.2.0-rc1"
+    pipeline_git_ref: "v0.4.0"
     # Durable-storage backend: src-volume (default) | yoda | research-drive.
     storage_backend: "src-volume"
     # Yoda (iRODS) connection — consumed only when storage_backend == 'yoda'.

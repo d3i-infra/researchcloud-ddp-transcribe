@@ -121,6 +121,57 @@ Consequences:
   re-lists remote collections at ~3 s/op. Decide thread counts early; run long
   syncs in `tmux`.
 
+## Campaign checkpointing (tiered mode, continuous runners)
+
+The batch-end auto-sync (hop 1) only fires when a `process` invocation
+*exits*. Uncapped campaign runners grind for weeks without exiting, so the
+volume — and therefore anything hop 2 pushes, including the resume snapshot —
+goes stale unless hop 1 also runs mid-run (observed live 2026-07-29: a pushed
+snapshot lagged the DB by hours; escalated 2026-07-29..31 into a real
+transcript gap — see FOLLOWUPS).
+
+**On pipeline ≥ v0.3.2 (v0.4.0+ provisions) this is automatic:** the
+generated `run-pipeline*.sh` passes
+`--checkpoint-cmd ~/sync-to-storage.sh --checkpoint-every 4h` to `process`,
+which supersedes the manual hop-1 ritual (hook failures warn and count but
+never abort the run — pipeline ADR 0044).
+
+**The live campaign VM (`uutiktok`, pinned v0.3.0, no `--checkpoint-cmd`)
+runs a deployed stopgap instead** — intentional, operator-installed config
+drift, 2026-07-31: `~/checkpoint-sync.sh` (the same backup-first +
+`.work`/`*.tmp-*` excludes + tolerate-exit-24 logic as the fixed
+`sync-to-storage.sh`, with absolute paths) on cron `*/15 * * * *`, logging to
+`~/checkpoint-sync.log`. All provisioned scripts remain unmodified; any
+relaunch/upgrade re-renders the real scripts and supersedes the stopgap.
+
+Hop 2 remains operator-driven (~daily), safe with runners hot (write-once
+artifacts, flock, live-safe `.backup`):
+
+```
+~/sync-to-storage.sh && YODA_EXTRACT=0 ~/push-to-yoda.sh
+```
+
+(`YODA_EXTRACT=0` while extraction is policy-blocked on the collection — see
+the delivery contract below. Never run two `push-to-yoda.sh` concurrently:
+shared staging dir.)
+
+## Delivery contract while extraction is policy-blocked
+
+On the campaign collection (`research-tiktok-crime-policing`) server-side
+extraction returns `-1110000 MSI_OPERATION_NOT_ALLOWED` (FOLLOWUPS; FSW
+thread pending), so pushes run with `YODA_EXTRACT=0` and the contract with
+downstream consumers is:
+
+- **`transcripts-tars/` is the delivery.** Researchers pull the shard tars
+  and extract locally — `tar -xf shard-NN.tar` reconstructs the `NN/` tree
+  in place.
+- **The collection's browsable loose `transcripts/` tree is permanently
+  stale** (frozen at its 2026-07-29 content; it actively misled a downstream
+  consumer on 2026-07-31 into reporting "transcripts missing"). Do not pull
+  or count it. Recommended operator action: delete it, or drop a README
+  object into it marking it stale, until extraction is enabled and one
+  ordinary `push-to-yoda.sh` back-fills it.
+
 ## Transfer recipes
 
 - **`gocmd sync SRC DEST` is dual-mode:** if DEST exists it creates

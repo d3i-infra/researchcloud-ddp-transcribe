@@ -53,7 +53,7 @@ window. A rebuilt workspace resumes a batch via `~/restore-from-storage.sh`.
 | `yoda_user` | *(yoda only)* | interactive | Yoda username, e.g. `exampleuser@uu.nl` |
 | `yoda_host` / `yoda_zone` | `fsw.data.uu.nl` / `nluu10p` | keep | iRODS host/zone (UU defaults) |
 | `yoda_data_access_password` | *(Co-Secret)* | Co-Secret | Yoda data-access password (Yoda web portal → Data Transfer); yoda backend only |
-| `pipeline_git_ref` | `v0.2.0-rc1` | keep (overwrite to upgrade) | Pinned tag/ref of ddp-transcribe to build |
+| `pipeline_git_ref` | `v0.4.0` | keep (overwrite to upgrade) | Pinned tag/ref of ddp-transcribe to build |
 | `model_large_v3_turbo` | `true` | interactive | Download `ggml-large-v3-turbo-q5_0.bin` (~573 MB; production model) |
 | `model_tiny_en` | `false` | interactive | Download `ggml-tiny.en.bin` (~75 MB; smoke/dev) |
 | `model_small` | `false` | interactive | Download `ggml-small.bin` (~466 MB; multilingual fallback) |
