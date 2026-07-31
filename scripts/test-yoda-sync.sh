@@ -120,7 +120,7 @@ echo "— push-transcripts (tars + server-side extraction)"
 fresh_workdir
 "${SYNC}" push-transcripts
 check "shard tars landed under transcripts-tars/" '[ -f "${R}/transcripts-tars/shard-00.tar" ] && [ -f "${R}/transcripts-tars/shard-17.tar" ]'
-check "sync used --thread_num 10"                 'grep -q -- "--thread_num 10" "${FAKE_GOCMD_LOG}"'
+check "sync used pool-safe --thread_num 2"        'grep -q -- "--thread_num 2" "${FAKE_GOCMD_LOG}"'
 check "extraction produced per-file tree"         '[ -f "${R}/transcripts/00/100.json" ] && [ -f "${R}/transcripts/17/217.json" ]'
 check "one bun call per shard, right flags"       '[ "$(grep -c "^gocmd bun " "${FAKE_GOCMD_LOG}")" -eq 2 ] && grep -q -- "-x -f -D tar --timeout 1200" "${FAKE_GOCMD_LOG}"'
 check "manifest written"                          '[ -f "${WORK}/.transcripts-tars-pushed.md5" ]'

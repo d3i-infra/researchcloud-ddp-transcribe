@@ -36,6 +36,20 @@ export CUDA_VISIBLE_DEVICES={{ instance_id }}
 # waiting on an operator. Capture the subcommand before the binary consumes it.
 subcommand="${1:-}"
 
+# In-run checkpoint hook (pipeline >= v0.3.2; the playbook default satisfies
+# this — an older pipeline_git_ref rejects the flag with a clear error):
+# uncapped campaign runners grind for weeks without hitting the batch-end
+# sync below, so `process` runs sync-to-storage.sh periodically mid-run.
+# Hook failures warn and count but never abort the run (pipeline ADR 0044).
+# Skipped when the operator passes their own --checkpoint-cmd.
+checkpoint_args=()
+if [ "$subcommand" = "process" ]; then
+  case " $* " in
+    *' --checkpoint-cmd'*) ;;
+    *) checkpoint_args=(--checkpoint-cmd "{{ pipeline_home }}/sync-to-storage.sh" --checkpoint-every 4h) ;;
+  esac
+fi
+
 rc=0
 /usr/local/bin/ddp-transcribe \
   --state-db "{{ state_dir }}/state.sqlite" \
@@ -50,7 +64,7 @@ rc=0
 {% if compute_lang_probs | bool %}
   --compute-lang-probs \
 {% endif %}
-  "$@" || rc=$?
+  "$@" "${checkpoint_args[@]}" || rc=$?
 
 # Persist even on a non-zero exit so transcripts produced before an error (or
 # exit 3 = "zero videos claimed") are not stranded on the ephemeral boot disk.

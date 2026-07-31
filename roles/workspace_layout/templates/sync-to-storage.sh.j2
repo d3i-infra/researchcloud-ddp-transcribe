@@ -28,13 +28,25 @@ YODA_STATE_SNAPSHOT="{{ state_dir }}/state-snapshot.sqlite" \
 echo "synced (yoda): transcripts + state -> {{ yoda_collection }}"
 {% else %}
 # Mount-based sink (src-volume / mounted Research Drive).
-# Durable transcript sink: rsync the sharded NN/ tree boot disk -> volume.
-# write-once atomic artifacts make this safe even if a run is still active.
-rsync -a "{{ work_dir }}/transcripts/" "{{ storage_root }}/transcripts/"
-
 # Consistent online snapshot of the state DB (NOT a raw copy of a live WAL),
-# so a rebuilt workspace can resume via restore-from-storage.sh.
+# so a rebuilt workspace can resume via restore-from-storage.sh. Snapshot
+# FIRST: the rsync must never gate snapshot freshness (a mid-run rsync
+# hitting vanished in-flight files used to abort under set -e and silently
+# leave a stale snapshot — the 2026-07-29..31 transcript-gap incident), and
+# backup-before-artifacts guarantees the volume's artifacts are a superset
+# of its snapshot's succeeded set, so the volume copy can be verified
+# offline (`ddp-transcribe --state-db <snapshot> --transcripts
+# <volume>/transcripts status --verify`).
 sqlite3 "{{ state_dir }}/state.sqlite" ".backup '{{ storage_root }}/state-snapshot.sqlite'"
 
-echo "synced: transcripts -> {{ storage_root }}/transcripts; state -> {{ storage_root }}/state-snapshot.sqlite"
+# Durable transcript sink: rsync the sharded NN/ tree boot disk -> volume.
+# write-once atomic artifacts make this safe even if a run is still active.
+# In-flight fetch transients are excluded (never sync-worthy; on pipeline
+# >= v0.4.0 the .work/ tree self-cleans, making these cheap insurance), and
+# exit 24 (files vanished mid-scan during active fetching — expected, the
+# surviving files still synced) is tolerated.
+rsync -a --exclude='.work' --exclude='*.tmp-*' \
+  "{{ work_dir }}/transcripts/" "{{ storage_root }}/transcripts/" || [ $? -eq 24 ]
+
+echo "synced: state -> {{ storage_root }}/state-snapshot.sqlite; transcripts -> {{ storage_root }}/transcripts"
 {% endif %}
