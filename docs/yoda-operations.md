@@ -34,6 +34,20 @@ the server actually does.
   no gocmd, no config, no iRODS protocol:
   `curl -s -o /dev/null -w '%{http_code}\n' -u '<user>' 'https://fsw.data.uu.nl/'`
   (200 = DAP valid; the server answers WebDAV on the same host.)
+- **Fresh machine: write `~/.irods/irods_environment.json` BEFORE running
+  `gocmd init` — never answer the interactive questionnaire.** The
+  questionnaire produces a `native`-scheme config; against Yoda (PAM + SSL)
+  that sends the DAP down the wrong auth path, so every attempt fails AND
+  feeds the failed-attempt lockout tally (two fresh DAPs burned this way on
+  a new workstation, 2026-08-02). Mirror the role's template
+  (`roles/yoda/templates/irods_environment.json.j2`) with the UU values:
+  `pam_password`, `CS_NEG_REQUIRE`, and an **absolute**
+  `irods_authentication_file` path (JSON does not expand `~`). With the file
+  in place, `gocmd init --ttl 720 -c ~/.irods` has no questionnaire left —
+  it only asks for the password — and
+  `gocmd ls -c ~/.irods i:<collection>` verifies by exit code. If earlier
+  attempts already ran the questionnaire, `rm -rf ~/.irods` first: later
+  inits silently reuse the stale bad config.
 
 ## Data-access passwords (DAPs) — observed policy
 
@@ -71,7 +85,11 @@ something the role retries on its own:
    prompted. (The role's own stale-token probe pattern — no valid token found
    → re-init — also fires on the *next* provision/re-run, but that doesn't
    help mid-campaign on an already-running workspace; this step is the
-   operator doing the same thing manually.)
+   operator doing the same thing manually.) This is safe on a workspace
+   because provisioning already wrote `~/.irods/irods_environment.json` —
+   init only prompts for the password. On a machine WITHOUT that file, write
+   it first (see Authentication above): a bare init runs the questionnaire
+   and mis-configures the auth scheme.
 3. Verify with `gocmd ls i:<collection>` — judge success by exit code /
    listing output, never by `.irodsA` existing (see above).
 
